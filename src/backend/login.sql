@@ -1,7 +1,7 @@
-CREATE DATABASE IF NOT EXISTS pathlytics
+CREATE DATABASE IF NOT EXISTS railway
   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-USE pathlytics;
+USE railway;
 
 -- ============================================================
 -- Core users table
@@ -64,16 +64,3 @@ CREATE TABLE IF NOT EXISTS user_providers (
   UNIQUE KEY uniq_provider (provider, provider_user_id),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
-
--- ============================================================
--- One-time migration for EXISTING databases
--- (Safe to keep — IF NOT EXISTS / try-catch makes it idempotent)
--- ============================================================
-ALTER TABLE users
-  ADD COLUMN IF NOT EXISTS oauth_provider VARCHAR(20) DEFAULT NULL,
-  ADD COLUMN IF NOT EXISTS oauth_id VARCHAR(255) DEFAULT NULL,
-  ADD COLUMN IF NOT EXISTS avatar_url LONGTEXT DEFAULT NULL;
-
--- If avatar_url existed as VARCHAR(500) from a previous migration,
--- this widens it. Safe to run repeatedly.
-ALTER TABLE users MODIFY COLUMN avatar_url LONGTEXT NULL;
