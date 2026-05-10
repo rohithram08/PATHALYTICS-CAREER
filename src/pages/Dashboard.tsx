@@ -138,7 +138,7 @@ const Dashboard = () => {
                   </Link>
                 </Button>
                 <Button size="lg" variant="outline" asChild>
-                  <Link to="/login">Sign In</Link>
+                  <Link to="/signup">Sign Up</Link>
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground mt-4">
