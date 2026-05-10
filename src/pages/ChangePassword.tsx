@@ -9,10 +9,9 @@ import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
 import { cn } from '@/lib/utils';
-import type { ApiUser } from '@/lib/api';
 
 const ChangePassword = () => {
-  const { user, token } = useAuth();
+  const { user, token, refreshUser } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -104,6 +103,9 @@ const ChangePassword = () => {
         throw new Error(data.message || 'Request failed');
       }
 
+      // ✅ IMPORTANT FIX: refresh auth user so has_password becomes true
+      await refreshUser();
+
       setDone(true);
       toast({
         title: isSettingPassword ? 'Password set' : 'Password changed',
@@ -113,10 +115,15 @@ const ChangePassword = () => {
       });
 
       setTimeout(() => navigate('/settings'), 1800);
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : 'Something went wrong. Please try again.';
+
       toast({
         title: 'Error',
-        description: err.message || 'Something went wrong. Please try again.',
+        description: message,
         variant: 'destructive',
       });
     } finally {
@@ -164,7 +171,6 @@ const ChangePassword = () => {
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-5">
-              {/* Current password — only for change-password flow */}
               {!isSettingPassword && (
                 <div className="grid gap-2">
                   <Label htmlFor="current-password">Current password</Label>
@@ -194,7 +200,6 @@ const ChangePassword = () => {
                 </div>
               )}
 
-              {/* New / chosen password */}
               <div className="grid gap-2">
                 <Label htmlFor="new-password">
                   {isSettingPassword ? 'Password' : 'New password'}
@@ -223,7 +228,6 @@ const ChangePassword = () => {
                   </button>
                 </div>
 
-                {/* Strength indicator */}
                 {newPassword.length > 0 && (
                   <div className="space-y-1">
                     <div className="flex gap-1 h-1">
@@ -255,7 +259,6 @@ const ChangePassword = () => {
                 )}
               </div>
 
-              {/* Confirm password */}
               <div className="grid gap-2">
                 <Label htmlFor="confirm-password">Confirm password</Label>
                 <div className="relative">
