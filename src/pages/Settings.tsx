@@ -168,7 +168,7 @@ const Settings = () => {
     if (!user || !isDirty) return;
     setIsSaving(true);
     try {
-      const res = await fetch('${import.meta.env.VITE_API_URL}/api/auth/me', {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/me`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
