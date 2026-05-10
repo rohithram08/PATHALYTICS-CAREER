@@ -51,11 +51,12 @@ const initSchema = async () => {
     await addColumnIfMissing("users", "avatar_url", "VARCHAR(500) DEFAULT NULL");
     await addColumnIfMissing("users", "email_verified", "TINYINT(1) DEFAULT 0");
 
-    // Add missing columns to existing user_providers table
     await addColumnIfMissing("user_providers", "provider_id", "VARCHAR(255) NOT NULL DEFAULT ''");
     await addColumnIfMissing("user_providers", "provider_email", "VARCHAR(255) DEFAULT NULL");
 
-    // Make password nullable for OAuth-only accounts
+    // ADD THIS LINE to make old column optional:
+    await db.query("ALTER TABLE user_providers MODIFY COLUMN provider_user_id VARCHAR(255) DEFAULT ''").catch(() => {});
+        // Make password nullable for OAuth-only accounts
     try {
       await db.query("ALTER TABLE users MODIFY COLUMN password VARCHAR(255) DEFAULT ''");
     } catch (err) {
