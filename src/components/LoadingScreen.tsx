@@ -33,12 +33,13 @@ const PathalyticsLogo = () => (
     {([
       [40, 10], [66, 25], [66, 55], [40, 70], [14, 55], [14, 25],
     ] as [number, number][]).map(([cx, cy], i) => (
+      // AFTER
       <motion.circle
         key={i}
         cx={cx}
         cy={cy}
-        r={5.5}
         fill="#7C3AED"
+        initial={{ r: 5.5, opacity: 1 }}
         animate={{ r: [5.5, 7, 5.5], opacity: [1, 0.7, 1] }}
         transition={{
           duration: 2,
