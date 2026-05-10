@@ -1,3 +1,12 @@
+import {
+  CountryCode,
+  ExperienceLevel,
+  SalaryRange,
+  detectCountry,
+  formatSalary,
+  formatSalaryBoth,
+} from '@/lib/locale';
+
 export interface CareerRecommendation {
   id: string;
   title: string;
@@ -6,57 +15,36 @@ export interface CareerRecommendation {
   interests: string[];
   personality: string[];
   workStyle: string[];
-  salary: string;
+  /** Always stored in USD baseline — convert at display time */
+  salary: SalaryRange;
   growth: string;
   demand: 'High' | 'Very High' | 'Growing';
 }
 
-// Updated skill categories
+// ───── Skill / Interest / Personality / Work-style options (unchanged) ─────
 export const skills = [
-  'Programming Languages',
-  'Web / App Development',
-  'Data Analysis',
-  'Machine Learning',
-  'Cloud Computing',
-  'Networking',
-  'Cybersecurity',
-  'UI/UX Design',
-  'Testing & Automation',
+  'Programming Languages', 'Web / App Development', 'Data Analysis',
+  'Machine Learning', 'Cloud Computing', 'Networking',
+  'Cybersecurity', 'UI/UX Design', 'Testing & Automation',
 ] as const;
 
-// Updated interest categories
 export const interests = [
-  'Problem Solving',
-  'Data & Research',
-  'Designing Interfaces',
-  'Security & Ethical Hacking',
-  'Building Products',
-  'Teaching & Mentoring',
-  'Innovation & Startups',
-  'Gaming / AR / VR',
+  'Problem Solving', 'Data & Research', 'Designing Interfaces',
+  'Security & Ethical Hacking', 'Building Products', 'Teaching & Mentoring',
+  'Innovation & Startups', 'Gaming / AR / VR',
 ] as const;
 
-// Updated personality options
 export const personalities = [
-  'Analytical',
-  'Creative',
-  'Logical Thinker',
-  'Detail-Oriented',
-  'Leadership-Oriented',
-  'Research-Focused',
+  'Analytical', 'Creative', 'Logical Thinker',
+  'Detail-Oriented', 'Leadership-Oriented', 'Research-Focused',
 ] as const;
 
-// Updated work style options
 export const workStyles = [
-  'Individual-focused',
-  'Team-based',
-  'Remote-friendly',
-  'Structured environment',
-  'Flexible environment',
-  'Fast-paced startup style',
+  'Individual-focused', 'Team-based', 'Remote-friendly',
+  'Structured environment', 'Flexible environment', 'Fast-paced startup style',
 ] as const;
 
-// All 25 predefined careers
+// ───── 25 Careers (USD baseline ranges) ─────
 export const careers: CareerRecommendation[] = [
   {
     id: 'software-developer',
@@ -66,9 +54,8 @@ export const careers: CareerRecommendation[] = [
     interests: ['Problem Solving', 'Building Products'],
     personality: ['Logical Thinker', 'Detail-Oriented', 'Analytical'],
     workStyle: ['Team-based', 'Remote-friendly', 'Flexible environment'],
-    salary: '$80k - $150k',
-    growth: '+25%',
-    demand: 'High',
+    salary: { fresher: { min: 60000, max: 90000 }, experienced: { min: 100000, max: 160000 } },
+    growth: '+25%', demand: 'High',
   },
   {
     id: 'web-developer',
@@ -78,9 +65,8 @@ export const careers: CareerRecommendation[] = [
     interests: ['Building Products', 'Designing Interfaces', 'Problem Solving'],
     personality: ['Creative', 'Detail-Oriented', 'Logical Thinker'],
     workStyle: ['Remote-friendly', 'Flexible environment', 'Team-based'],
-    salary: '$70k - $130k',
-    growth: '+23%',
-    demand: 'High',
+    salary: { fresher: { min: 50000, max: 80000 }, experienced: { min: 90000, max: 140000 } },
+    growth: '+23%', demand: 'High',
   },
   {
     id: 'mobile-app-developer',
@@ -90,9 +76,8 @@ export const careers: CareerRecommendation[] = [
     interests: ['Building Products', 'Designing Interfaces', 'Problem Solving'],
     personality: ['Creative', 'Detail-Oriented', 'Logical Thinker'],
     workStyle: ['Remote-friendly', 'Flexible environment', 'Individual-focused'],
-    salary: '$85k - $145k',
-    growth: '+22%',
-    demand: 'High',
+    salary: { fresher: { min: 60000, max: 90000 }, experienced: { min: 100000, max: 155000 } },
+    growth: '+22%', demand: 'High',
   },
   {
     id: 'data-analyst',
@@ -102,9 +87,8 @@ export const careers: CareerRecommendation[] = [
     interests: ['Data & Research', 'Problem Solving'],
     personality: ['Analytical', 'Detail-Oriented', 'Logical Thinker'],
     workStyle: ['Structured environment', 'Team-based', 'Remote-friendly'],
-    salary: '$65k - $110k',
-    growth: '+20%',
-    demand: 'High',
+    salary: { fresher: { min: 45000, max: 70000 }, experienced: { min: 80000, max: 120000 } },
+    growth: '+20%', demand: 'High',
   },
   {
     id: 'data-scientist',
@@ -114,9 +98,8 @@ export const careers: CareerRecommendation[] = [
     interests: ['Data & Research', 'Problem Solving', 'Innovation & Startups'],
     personality: ['Analytical', 'Research-Focused', 'Logical Thinker'],
     workStyle: ['Individual-focused', 'Remote-friendly', 'Flexible environment'],
-    salary: '$110k - $170k',
-    growth: '+28%',
-    demand: 'Very High',
+    salary: { fresher: { min: 80000, max: 115000 }, experienced: { min: 130000, max: 190000 } },
+    growth: '+28%', demand: 'Very High',
   },
   {
     id: 'ml-engineer',
@@ -126,21 +109,19 @@ export const careers: CareerRecommendation[] = [
     interests: ['Data & Research', 'Problem Solving', 'Innovation & Startups'],
     personality: ['Analytical', 'Research-Focused', 'Logical Thinker'],
     workStyle: ['Remote-friendly', 'Flexible environment', 'Team-based'],
-    salary: '$120k - $200k',
-    growth: '+40%',
-    demand: 'Very High',
+    salary: { fresher: { min: 90000, max: 130000 }, experienced: { min: 150000, max: 230000 } },
+    growth: '+40%', demand: 'Very High',
   },
   {
     id: 'ai-engineer',
     title: 'AI Engineer',
-    description: 'Design and implement artificial intelligence solutions including NLP, computer vision, and deep learning systems.',
+    description: 'Design and implement AI solutions including NLP, computer vision, and deep learning systems.',
     skills: ['Machine Learning', 'Programming Languages', 'Cloud Computing'],
     interests: ['Innovation & Startups', 'Data & Research', 'Problem Solving'],
     personality: ['Research-Focused', 'Analytical', 'Creative'],
     workStyle: ['Flexible environment', 'Remote-friendly', 'Fast-paced startup style'],
-    salary: '$130k - $210k',
-    growth: '+45%',
-    demand: 'Very High',
+    salary: { fresher: { min: 95000, max: 135000 }, experienced: { min: 160000, max: 240000 } },
+    growth: '+45%', demand: 'Very High',
   },
   {
     id: 'cloud-engineer',
@@ -150,9 +131,8 @@ export const careers: CareerRecommendation[] = [
     interests: ['Problem Solving', 'Building Products'],
     personality: ['Logical Thinker', 'Analytical', 'Detail-Oriented'],
     workStyle: ['Team-based', 'Remote-friendly', 'Structured environment'],
-    salary: '$100k - $180k',
-    growth: '+35%',
-    demand: 'Very High',
+    salary: { fresher: { min: 75000, max: 105000 }, experienced: { min: 120000, max: 190000 } },
+    growth: '+35%', demand: 'Very High',
   },
   {
     id: 'devops-engineer',
@@ -162,9 +142,8 @@ export const careers: CareerRecommendation[] = [
     interests: ['Building Products', 'Problem Solving'],
     personality: ['Logical Thinker', 'Detail-Oriented', 'Analytical'],
     workStyle: ['Team-based', 'Remote-friendly', 'Fast-paced startup style'],
-    salary: '$100k - $165k',
-    growth: '+24%',
-    demand: 'High',
+    salary: { fresher: { min: 75000, max: 105000 }, experienced: { min: 120000, max: 175000 } },
+    growth: '+24%', demand: 'High',
   },
   {
     id: 'systems-engineer',
@@ -174,9 +153,8 @@ export const careers: CareerRecommendation[] = [
     interests: ['Problem Solving', 'Building Products'],
     personality: ['Logical Thinker', 'Analytical', 'Detail-Oriented'],
     workStyle: ['Structured environment', 'Team-based', 'Individual-focused'],
-    salary: '$90k - $150k',
-    growth: '+18%',
-    demand: 'High',
+    salary: { fresher: { min: 65000, max: 95000 }, experienced: { min: 105000, max: 160000 } },
+    growth: '+18%', demand: 'High',
   },
   {
     id: 'cybersecurity-analyst',
@@ -186,9 +164,8 @@ export const careers: CareerRecommendation[] = [
     interests: ['Security & Ethical Hacking', 'Problem Solving', 'Data & Research'],
     personality: ['Detail-Oriented', 'Analytical', 'Logical Thinker'],
     workStyle: ['Structured environment', 'Team-based', 'Individual-focused'],
-    salary: '$85k - $140k',
-    growth: '+32%',
-    demand: 'Very High',
+    salary: { fresher: { min: 65000, max: 95000 }, experienced: { min: 105000, max: 155000 } },
+    growth: '+32%', demand: 'Very High',
   },
   {
     id: 'ethical-hacker',
@@ -198,9 +175,8 @@ export const careers: CareerRecommendation[] = [
     interests: ['Security & Ethical Hacking', 'Problem Solving'],
     personality: ['Analytical', 'Creative', 'Detail-Oriented'],
     workStyle: ['Individual-focused', 'Flexible environment', 'Remote-friendly'],
-    salary: '$95k - $160k',
-    growth: '+35%',
-    demand: 'Very High',
+    salary: { fresher: { min: 70000, max: 100000 }, experienced: { min: 115000, max: 180000 } },
+    growth: '+35%', demand: 'Very High',
   },
   {
     id: 'network-engineer',
@@ -210,9 +186,8 @@ export const careers: CareerRecommendation[] = [
     interests: ['Problem Solving', 'Building Products'],
     personality: ['Logical Thinker', 'Detail-Oriented', 'Analytical'],
     workStyle: ['Structured environment', 'Team-based', 'Individual-focused'],
-    salary: '$75k - $130k',
-    growth: '+15%',
-    demand: 'High',
+    salary: { fresher: { min: 55000, max: 85000 }, experienced: { min: 90000, max: 140000 } },
+    growth: '+15%', demand: 'High',
   },
   {
     id: 'software-tester',
@@ -222,9 +197,8 @@ export const careers: CareerRecommendation[] = [
     interests: ['Problem Solving', 'Data & Research'],
     personality: ['Detail-Oriented', 'Analytical', 'Logical Thinker'],
     workStyle: ['Team-based', 'Structured environment', 'Remote-friendly'],
-    salary: '$60k - $100k',
-    growth: '+15%',
-    demand: 'High',
+    salary: { fresher: { min: 45000, max: 70000 }, experienced: { min: 75000, max: 115000 } },
+    growth: '+15%', demand: 'High',
   },
   {
     id: 'automation-test-engineer',
@@ -234,9 +208,8 @@ export const careers: CareerRecommendation[] = [
     interests: ['Problem Solving', 'Building Products'],
     personality: ['Logical Thinker', 'Detail-Oriented', 'Analytical'],
     workStyle: ['Team-based', 'Remote-friendly', 'Flexible environment'],
-    salary: '$80k - $130k',
-    growth: '+20%',
-    demand: 'High',
+    salary: { fresher: { min: 60000, max: 85000 }, experienced: { min: 95000, max: 145000 } },
+    growth: '+20%', demand: 'High',
   },
   {
     id: 'ui-ux-designer',
@@ -246,9 +219,8 @@ export const careers: CareerRecommendation[] = [
     interests: ['Designing Interfaces', 'Building Products', 'Problem Solving'],
     personality: ['Creative', 'Detail-Oriented', 'Analytical'],
     workStyle: ['Flexible environment', 'Remote-friendly', 'Team-based'],
-    salary: '$75k - $130k',
-    growth: '+18%',
-    demand: 'High',
+    salary: { fresher: { min: 55000, max: 85000 }, experienced: { min: 90000, max: 145000 } },
+    growth: '+18%', demand: 'High',
   },
   {
     id: 'technical-product-manager',
@@ -258,9 +230,8 @@ export const careers: CareerRecommendation[] = [
     interests: ['Building Products', 'Problem Solving', 'Innovation & Startups'],
     personality: ['Leadership-Oriented', 'Analytical', 'Creative'],
     workStyle: ['Team-based', 'Fast-paced startup style', 'Flexible environment'],
-    salary: '$110k - $175k',
-    growth: '+22%',
-    demand: 'High',
+    salary: { fresher: { min: 85000, max: 115000 }, experienced: { min: 130000, max: 200000 } },
+    growth: '+22%', demand: 'High',
   },
   {
     id: 'research-scientist',
@@ -270,9 +241,8 @@ export const careers: CareerRecommendation[] = [
     interests: ['Data & Research', 'Innovation & Startups', 'Problem Solving'],
     personality: ['Research-Focused', 'Analytical', 'Creative'],
     workStyle: ['Individual-focused', 'Flexible environment', 'Structured environment'],
-    salary: '$100k - $180k',
-    growth: '+30%',
-    demand: 'Very High',
+    salary: { fresher: { min: 80000, max: 115000 }, experienced: { min: 130000, max: 210000 } },
+    growth: '+30%', demand: 'Very High',
   },
   {
     id: 'computer-vision-engineer',
@@ -282,9 +252,8 @@ export const careers: CareerRecommendation[] = [
     interests: ['Data & Research', 'Innovation & Startups', 'Problem Solving'],
     personality: ['Research-Focused', 'Analytical', 'Detail-Oriented'],
     workStyle: ['Team-based', 'Flexible environment', 'Remote-friendly'],
-    salary: '$115k - $190k',
-    growth: '+35%',
-    demand: 'Very High',
+    salary: { fresher: { min: 90000, max: 125000 }, experienced: { min: 140000, max: 220000 } },
+    growth: '+35%', demand: 'Very High',
   },
   {
     id: 'blockchain-developer',
@@ -294,9 +263,8 @@ export const careers: CareerRecommendation[] = [
     interests: ['Innovation & Startups', 'Building Products', 'Security & Ethical Hacking'],
     personality: ['Logical Thinker', 'Analytical', 'Creative'],
     workStyle: ['Remote-friendly', 'Fast-paced startup style', 'Flexible environment'],
-    salary: '$100k - $180k',
-    growth: '+28%',
-    demand: 'Growing',
+    salary: { fresher: { min: 75000, max: 110000 }, experienced: { min: 120000, max: 200000 } },
+    growth: '+28%', demand: 'Growing',
   },
   {
     id: 'game-developer',
@@ -306,9 +274,8 @@ export const careers: CareerRecommendation[] = [
     interests: ['Gaming / AR / VR', 'Building Products', 'Designing Interfaces'],
     personality: ['Creative', 'Logical Thinker', 'Detail-Oriented'],
     workStyle: ['Team-based', 'Flexible environment', 'Fast-paced startup style'],
-    salary: '$70k - $140k',
-    growth: '+18%',
-    demand: 'Growing',
+    salary: { fresher: { min: 50000, max: 80000 }, experienced: { min: 90000, max: 155000 } },
+    growth: '+18%', demand: 'Growing',
   },
   {
     id: 'ar-vr-developer',
@@ -318,9 +285,8 @@ export const careers: CareerRecommendation[] = [
     interests: ['Gaming / AR / VR', 'Innovation & Startups', 'Designing Interfaces'],
     personality: ['Creative', 'Analytical', 'Logical Thinker'],
     workStyle: ['Team-based', 'Flexible environment', 'Fast-paced startup style'],
-    salary: '$85k - $160k',
-    growth: '+25%',
-    demand: 'Growing',
+    salary: { fresher: { min: 65000, max: 95000 }, experienced: { min: 105000, max: 175000 } },
+    growth: '+25%', demand: 'Growing',
   },
   {
     id: 'technical-support-engineer',
@@ -330,9 +296,8 @@ export const careers: CareerRecommendation[] = [
     interests: ['Problem Solving', 'Teaching & Mentoring'],
     personality: ['Detail-Oriented', 'Analytical', 'Logical Thinker'],
     workStyle: ['Team-based', 'Structured environment', 'Remote-friendly'],
-    salary: '$55k - $95k',
-    growth: '+12%',
-    demand: 'High',
+    salary: { fresher: { min: 40000, max: 65000 }, experienced: { min: 70000, max: 110000 } },
+    growth: '+12%', demand: 'High',
   },
   {
     id: 'cs-lecturer',
@@ -342,9 +307,8 @@ export const careers: CareerRecommendation[] = [
     interests: ['Teaching & Mentoring', 'Data & Research', 'Problem Solving'],
     personality: ['Leadership-Oriented', 'Creative', 'Analytical'],
     workStyle: ['Structured environment', 'Individual-focused', 'Flexible environment'],
-    salary: '$60k - $120k',
-    growth: '+10%',
-    demand: 'High',
+    salary: { fresher: { min: 45000, max: 75000 }, experienced: { min: 80000, max: 130000 } },
+    growth: '+10%', demand: 'High',
   },
   {
     id: 'entrepreneur',
@@ -354,17 +318,29 @@ export const careers: CareerRecommendation[] = [
     interests: ['Innovation & Startups', 'Building Products', 'Problem Solving'],
     personality: ['Leadership-Oriented', 'Creative', 'Analytical'],
     workStyle: ['Fast-paced startup style', 'Flexible environment', 'Individual-focused'],
-    salary: 'Variable',
-    growth: '+15%',
-    demand: 'Growing',
+    salary: { fresher: { min: 0, max: 50000 }, experienced: { min: 60000, max: 500000 } },
+    growth: '+15%', demand: 'Growing',
   },
 ];
+
+// =======================================================
+// Recommendation Engine
+// =======================================================
 
 export interface UserPreferences {
   skills: string[];
   interests: string[];
   personality: string[];
   workStyle: string[];
+  /** Optional contact info — used to detect locale */
+  contact?: {
+    phone?: string;
+    email?: string;
+  };
+  /** Optional experience level for salary display */
+  experience?: ExperienceLevel;
+  /** Optional manual country override */
+  country?: CountryCode;
 }
 
 export interface RecommendationResult extends CareerRecommendation {
@@ -374,21 +350,45 @@ export interface RecommendationResult extends CareerRecommendation {
   matchedPersonality: string[];
   matchedWorkStyle: string[];
   explanation: string[];
+  /** Locale-formatted salary strings */
+  salaryDisplay: {
+    fresher: string;
+    experienced: string;
+    primary: string;          // formatted based on requested experience level
+    country: string;
+    currency: string;
+  };
 }
 
-export function getCareerRecommendations(preferences: UserPreferences): RecommendationResult[] {
-  const { skills: userSkills, interests: userInterests, personality: userPersonality, workStyle: userWorkStyle } = preferences;
+export function getCareerRecommendations(
+  preferences: UserPreferences
+): RecommendationResult[] {
+  const {
+    skills: userSkills = [],
+    interests: userInterests = [],
+    personality: userPersonality = [],
+    workStyle: userWorkStyle = [],
+    contact,
+    experience = 'fresher',
+    country: manualCountry,
+  } = preferences;
 
-  // Check if any preferences are selected
-  const hasPreferences = 
-    userSkills.length > 0 || 
-    userInterests.length > 0 || 
-    userPersonality.length > 0 || 
+  const hasPreferences =
+    userSkills.length > 0 ||
+    userInterests.length > 0 ||
+    userPersonality.length > 0 ||
     userWorkStyle.length > 0;
 
-  if (!hasPreferences) {
-    return [];
-  }
+  if (!hasPreferences) return [];
+
+  // Detect country: manual override → phone → email → US fallback
+  const country: CountryCode =
+    manualCountry ||
+    detectCountry({
+      phone: contact?.phone,
+      email: contact?.email,
+      fallback: 'US',
+    });
 
   const results: RecommendationResult[] = careers.map((career) => {
     const matchedSkills = career.skills.filter((s) => userSkills.includes(s));
@@ -396,29 +396,27 @@ export function getCareerRecommendations(preferences: UserPreferences): Recommen
     const matchedPersonality = career.personality.filter((p) => userPersonality.includes(p));
     const matchedWorkStyle = career.workStyle.filter((w) => userWorkStyle.includes(w));
 
-    // Calculate match score (weighted)
-    const skillScore = matchedSkills.length * 3; // Skills weighted highest
-    const interestScore = matchedInterests.length * 2;
-    const personalityScore = matchedPersonality.length * 1.5;
-    const workStyleScore = matchedWorkStyle.length * 1;
+    const matchScore =
+      matchedSkills.length * 3 +
+      matchedInterests.length * 2 +
+      matchedPersonality.length * 1.5 +
+      matchedWorkStyle.length * 1;
 
-    const matchScore = skillScore + interestScore + personalityScore + workStyleScore;
-
-    // Generate explanations
     const explanation: string[] = [];
-    
-    if (matchedSkills.length > 0) {
-      explanation.push(`Recommended because your skills in ${matchedSkills.join(', ')} match this role.`);
-    }
-    if (matchedInterests.length > 0) {
+    if (matchedSkills.length)
+      explanation.push(`Your skills in ${matchedSkills.join(', ')} fit this role.`);
+    if (matchedInterests.length)
       explanation.push(`Matches your interest in ${matchedInterests.join(' and ').toLowerCase()}.`);
-    }
-    if (matchedPersonality.length > 0) {
-      explanation.push(`Suitable for your ${matchedPersonality.join(', ').toLowerCase()} personality.`);
-    }
-    if (matchedWorkStyle.length > 0) {
-      explanation.push(`Fits your preference for ${matchedWorkStyle.join(', ').toLowerCase()} work.`);
-    }
+    if (matchedPersonality.length)
+      explanation.push(`Suits your ${matchedPersonality.join(', ').toLowerCase()} personality.`);
+    if (matchedWorkStyle.length)
+      explanation.push(`Aligns with your preference for ${matchedWorkStyle.join(', ').toLowerCase()} work.`);
+
+    const both = formatSalaryBoth(career.salary, country);
+    const salaryDisplay = {
+      ...both,
+      primary: formatSalary(career.salary, country, experience),
+    };
 
     return {
       ...career,
@@ -428,10 +426,10 @@ export function getCareerRecommendations(preferences: UserPreferences): Recommen
       matchedPersonality,
       matchedWorkStyle,
       explanation,
+      salaryDisplay,
     };
   });
 
-  // Filter out careers with no matches and sort by score
   return results
     .filter((r) => r.matchScore > 0)
     .sort((a, b) => b.matchScore - a.matchScore);

@@ -36,6 +36,7 @@ export interface Roadmap {
   certifications?: string[];
   entryLevelRoles: string[];
   careerGrowth: string[];
+  experiencedRoles?: string[];
 }
 
 export const roadmaps: Roadmap[] = [
