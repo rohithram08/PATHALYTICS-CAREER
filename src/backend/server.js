@@ -6,10 +6,10 @@ import helmet from "helmet";
 import cookieParser from "cookie-parser";
 import morgan from "morgan";
 import passport from "passport";
-import meRoutes from "./routes/me.js";
 
 import authRoutes from "./routes/auth.js";
-import changePasswordRoutes from "./routes/changepassword.js";
+import meRoutes from "./routes/me.js";
+import passwordRoutes from "./routes/password.js";
 import oauthRoutes from "./routes/oauth.js";
 import greenhouseApplyRoutes from "./routes/greenhouse-apply.js";
 
@@ -20,7 +20,6 @@ const app = express();
 // ============ Security & Middleware ============
 app.use(
   helmet({
-    // Allow OAuth redirects to external providers
     crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
   })
 );
@@ -47,10 +46,10 @@ app.get("/health", (_req, res) =>
 );
 
 app.use("/api/auth", authRoutes);
-app.use("/api/auth", meRoutes); // Email/password auth
-app.use("/api/auth", oauthRoutes); // Google + GitHub OAuth
-app.use("/api", changePasswordRoutes);
-app.use("/api/greenhouse", greenhouseApplyRoutes); // Real Easy Apply (Greenhouse proxy)
+app.use("/api/auth", meRoutes);
+app.use("/api/auth", oauthRoutes);
+app.use("/api/auth", passwordRoutes);
+app.use("/api/greenhouse", greenhouseApplyRoutes);
 
 // ============ Global Error Handler ============
 app.use((err, _req, res, _next) => {
