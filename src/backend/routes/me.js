@@ -175,4 +175,20 @@ router.delete("/providers/:provider", authenticate, async (req, res) => {
   }
 });
 
+// ============ DELETE /me — Delete Account ============
+router.delete('/me', authenticate, async (req, res) => {
+  try {
+    // Remove linked OAuth providers first (avoids FK constraint errors)
+    await db.query('DELETE FROM user_providers WHERE user_id = ?', [req.userId]);
+
+    // Delete the user account
+    await db.query('DELETE FROM users WHERE id = ?', [req.userId]);
+
+    res.json({ message: 'Account deleted successfully' });
+  } catch (err) {
+    console.error('DELETE /me error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 export default router;
