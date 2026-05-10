@@ -87,7 +87,7 @@ const Header = () => {
 
   const Logo = () => (
     <>
-      <img src={logo} alt="Pathalytics Logo" className="w-8 h-8 object-contain" />
+      <img src={logo} alt="Pathalytics Logo" className="w-8 h-8 object-cover rounded-full" />
       <span className="text-base font-bold tracking-tight">
         Path<span className="gradient-text">alytics</span>
       </span>
