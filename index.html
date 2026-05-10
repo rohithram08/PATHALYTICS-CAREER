@@ -43,50 +43,9 @@
     />
     <meta name="twitter:image" content="https://pathalytics.vercel.app/og-image.png" />
 
-    <!-- ═══ FAVICONS — Circular via SVG mask ═══ -->
-    <!--
-      HOW THE CIRCLE WORKS:
-      • Use a .png favicon with a transparent background (circular shape baked in), OR
-      • Use an SVG favicon with clipPath as below — most modern browsers support it.
-      Replace the href values with your actual asset paths.
-    -->
-
-    <!-- SVG favicon (Chrome, Firefox, Edge — renders perfectly circular) -->
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-
-    <!-- PNG fallback for Safari / older browsers -->
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
-    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
-
-    <!-- Apple touch icon (iOS home screen) -->
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
-
-    <!-- Web app manifest (optional but recommended) -->
-    <link rel="manifest" href="/site.webmanifest" />
-    <meta name="theme-color" content="#0f172a" />
-
-    <!--
-    ═══════════════════════════════════════════════════════════
-    CIRCULAR LOGO IN YOUR REACT APP
-    ─────────────────────────────────────────────────────────
-    If your logo <img> is inside a React component, add this
-    class or inline style to make it circular:
-
-      <img src="/logo.png" alt="Pathalytics" className="logo-circle" />
-
-    Then in your CSS / Tailwind:
-
-      .logo-circle {
-        border-radius: 50%;
-        object-fit: cover;        /* keeps aspect ratio clean */
-        width: 48px;              /* set your desired size */
-        height: 48px;
-      }
-
-    Or with Tailwind classes:
-      className="rounded-full object-cover w-12 h-12"
-    ═══════════════════════════════════════════════════════════
-    -->
+    <!-- ═══ FAVICON — only using files you actually have ═══ -->
+    <link rel="icon" href="public/favicon.ico" type="image/x-icon" />
+    <meta name="theme-color" content="#7c3aed" />
 
     <!-- ═══ STRUCTURED DATA (Google Rich Results) ═══ -->
     <script type="application/ld+json">
@@ -101,13 +60,8 @@
           "name": "Pathalytics",
           "logo": {
             "@type": "ImageObject",
-            "url": "https://pathalytics.vercel.app/logo.png"
+            "url": "https://pathalytics.vercel.app/og-image.png"
           }
-        },
-        "potentialAction": {
-          "@type": "SearchAction",
-          "target": "https://pathalytics.vercel.app/search?q={search_term_string}",
-          "query-input": "required name=search_term_string"
         }
       }
     </script>
