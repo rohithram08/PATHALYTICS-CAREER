@@ -376,8 +376,8 @@ const Settings = () => {
           <SettingsSection icon={Shield} iconClass="bg-success/10 text-success" title="Security" description="Keep your account safe.">
             <div className="space-y-2">
               {[
-                { label: 'Password', desc: 'Change your password', icon: KeyRound, path: '/change-password' },
-                { label: 'Two-factor authentication', desc: 'Add an extra verification step', icon: Smartphone, path: '/two-factor-auth' },
+                { label: 'Password', desc: 'Change your password', icon: KeyRound, path: '@/Path/ChangePassword' },
+                { label: 'Two-factor authentication', desc: 'Add an extra verification step', icon: Smartphone, path: '@/Path/TwoFactorAuth' },
               ].map((item) => (
                 <button
                   key={item.label}
