@@ -143,8 +143,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }));
 
       try {
-        const res = await fetch(`${API_URL}/api/auth/profile`, {
-          method: "PUT",
+        const res = await fetch(`${API_URL}/api/auth/me`, {
+          method: "PATCH",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
