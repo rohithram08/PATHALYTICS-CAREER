@@ -32,7 +32,7 @@ import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/s
 import ThemeToggle from "@/components/ThemeToggle";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
-import logo from "@/assets/logo.png";
+import favicon from "@/public/favicon.svg";
 
 const Header = () => {
   const [scrolled, setScrolled] = useState(false);
@@ -87,7 +87,7 @@ const Header = () => {
 
   const Logo = () => (
     <>
-      <img src={logo} alt="Pathalytics Logo" className="w-8 h-8 object-cover rounded-full" />
+      <img src={favicon} alt="Pathalytics Logo" className="w-8 h-8 object-cover rounded-full" />
       <span className="text-base font-bold tracking-tight">
         Path<span className="gradient-text">alytics</span>
       </span>
