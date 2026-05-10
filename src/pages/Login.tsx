@@ -21,7 +21,7 @@ import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
-import logo from "@/assets/logo.png";
+import favicon from "@/public/favicon.svg";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
@@ -155,7 +155,7 @@ const Login = () => {
         >
           <Link to="/" className="flex items-center gap-2 mb-10">
             <img
-              src={logo}
+              src={favicon}
               alt="Pathalytics Logo"
               className="w-10 h-10 object-contain"
             />
