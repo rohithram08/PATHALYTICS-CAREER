@@ -13,8 +13,6 @@ CREATE TABLE IF NOT EXISTS users (
   password VARCHAR(255) DEFAULT '',
   role ENUM('user', 'admin', 'mentor') DEFAULT 'user' NOT NULL,
   avatar_url LONGTEXT NULL,
-  oauth_provider VARCHAR(20) DEFAULT NULL,
-  oauth_id VARCHAR(255) DEFAULT NULL,
   otp VARCHAR(255) NULL,
   otp_expires_at DATETIME NULL,
   email_verified BOOLEAN DEFAULT FALSE,
@@ -23,8 +21,7 @@ CREATE TABLE IF NOT EXISTS users (
   locked_until DATETIME NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  INDEX idx_email (email),
-  INDEX idx_oauth (oauth_provider, oauth_id)
+  INDEX idx_email (email)
 );
 
 -- ============================================================
@@ -53,14 +50,17 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 );
 
 -- ============================================================
--- OAuth providers (for linking multiple sign-in methods)
+-- OAuth providers — one row per linked provider per user
 -- ============================================================
 CREATE TABLE IF NOT EXISTS user_providers (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL,
   provider VARCHAR(20) NOT NULL,
   provider_user_id VARCHAR(255) NOT NULL,
+  provider_email VARCHAR(255) DEFAULT NULL,
   linked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE KEY uniq_provider (provider, provider_user_id),
+  UNIQUE KEY unique_provider_account (provider, provider_user_id),
+  UNIQUE KEY unique_user_provider (user_id, provider),
+  INDEX idx_user (user_id),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );

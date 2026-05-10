@@ -237,7 +237,7 @@ const Settings = () => {
 
       if (!res.ok) throw new Error('Failed to update profile');
 
-      updateUser({ name: name.trim(), avatar: profileImage || undefined });
+      updateUser({ name: name.trim(), avatar: profileImage || null });
       localStorage.setItem(userKey(NOTIF_KEY), JSON.stringify(notifications));
 
       const imgKey = userKey('profile_image');

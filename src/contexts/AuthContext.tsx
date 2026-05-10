@@ -15,7 +15,7 @@ export interface AuthUser {
   id?: string;
   name?: string;
   email?: string;
-  avatar?: string;
+  avatar?: string | null;
   role?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -23,6 +23,14 @@ export interface AuthUser {
   bio?: string;
   location?: string;
   website?: string;
+  // ✅ Added — required for Settings and ChangePassword pages
+  email_verified?: boolean;
+  has_password?: boolean;
+  providers?: Array<{
+    name: string;
+    email?: string | null;
+    linkedAt: string;
+  }>;
 }
 
 interface AuthContextType {

@@ -1,0 +1,1 @@
+function t(){var e;try{const r=localStorage.getItem("pathlytics_user");if(r)return((e=JSON.parse(r).email)==null?void 0:e.replace(/[^a-zA-Z0-9]/g,"_"))||"guest"}catch{}return"guest"}function u(e){return`${e}_${t()}`}export{t as g,u};

@@ -6,10 +6,10 @@ import db from "../db.js";
 
 const router = express.Router();
 
-// ============ Auth Middleware ============
+// ── Auth middleware ──────────────────────────────────────────
 export const authenticate = (req, res, next) => {
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  if (!authHeader?.startsWith("Bearer ")) {
     return res.status(401).json({ message: "No token provided" });
   }
 
@@ -23,25 +23,29 @@ export const authenticate = (req, res, next) => {
   }
 };
 
-// ============ GET /me ============
+// ── GET /me ──────────────────────────────────────────────────
 router.get("/me", authenticate, async (req, res) => {
   try {
     const [userRows] = await db.query(
-      `SELECT 
+      `SELECT
          id, name, email, role,
          avatar_url AS avatar,
-         email_verified, created_at AS createdAt,
+         email_verified,
+         created_at AS createdAt,
          CASE WHEN password = '' OR password IS NULL THEN 0 ELSE 1 END AS has_password
-       FROM users WHERE id = ?`,
+       FROM users
+       WHERE id = ?`,
       [req.userId]
     );
 
-    if (userRows.length === 0) {
+    if (!userRows.length) {
       return res.status(404).json({ message: "User not found" });
     }
 
     const [providers] = await db.query(
-      "SELECT provider, linked_at FROM user_providers WHERE user_id = ?",
+      `SELECT provider, provider_email, linked_at
+       FROM user_providers
+       WHERE user_id = ?`,
       [req.userId]
     );
 
@@ -53,6 +57,7 @@ router.get("/me", authenticate, async (req, res) => {
         has_password: !!user.has_password,
         providers: providers.map((p) => ({
           name: p.provider,
+          email: p.provider_email,
           linkedAt: p.linked_at,
         })),
       },
@@ -63,10 +68,10 @@ router.get("/me", authenticate, async (req, res) => {
   }
 });
 
-// ============ PATCH /me — Update Profile ============
+// ── PATCH /me ────────────────────────────────────────────────
 const updateMeSchema = z.object({
   name: z.string().min(2).max(60).trim().optional(),
-  avatar: z.string().nullable().optional(), // base64 string or null to remove
+  avatar: z.string().nullable().optional(),
 });
 
 router.patch("/me", authenticate, async (req, res) => {
@@ -80,8 +85,6 @@ router.patch("/me", authenticate, async (req, res) => {
     }
 
     const { name, avatar } = parsed.data;
-
-    // Build dynamic UPDATE
     const fields = [];
     const values = [];
 
@@ -91,34 +94,36 @@ router.patch("/me", authenticate, async (req, res) => {
     }
 
     if (avatar !== undefined) {
-      // Reject avatars > ~2.7 MB base64 (≈ 2 MB binary)
       if (avatar && avatar.length > 2_800_000) {
         return res.status(400).json({ message: "Avatar too large (max 2 MB)" });
       }
       fields.push("avatar_url = ?");
-      values.push(avatar); // null is valid (removes the avatar)
+      values.push(avatar);
     }
 
-    if (fields.length === 0) {
+    if (!fields.length) {
       return res.status(400).json({ message: "No valid fields to update" });
     }
 
     values.push(req.userId);
     await db.query(`UPDATE users SET ${fields.join(", ")} WHERE id = ?`, values);
 
-    // Return the fresh user (same shape as GET /me)
     const [userRows] = await db.query(
-      `SELECT 
+      `SELECT
          id, name, email, role,
          avatar_url AS avatar,
-         email_verified, created_at AS createdAt,
+         email_verified,
+         created_at AS createdAt,
          CASE WHEN password = '' OR password IS NULL THEN 0 ELSE 1 END AS has_password
-       FROM users WHERE id = ?`,
+       FROM users
+       WHERE id = ?`,
       [req.userId]
     );
 
     const [providers] = await db.query(
-      "SELECT provider, linked_at FROM user_providers WHERE user_id = ?",
+      `SELECT provider, provider_email, linked_at
+       FROM user_providers
+       WHERE user_id = ?`,
       [req.userId]
     );
 
@@ -130,6 +135,7 @@ router.patch("/me", authenticate, async (req, res) => {
         has_password: !!user.has_password,
         providers: providers.map((p) => ({
           name: p.provider,
+          email: p.provider_email,
           linkedAt: p.linked_at,
         })),
       },
@@ -140,54 +146,54 @@ router.patch("/me", authenticate, async (req, res) => {
   }
 });
 
-// ============ Unlink a provider ============
+// ── DELETE /providers/:provider ──────────────────────────────
 router.delete("/providers/:provider", authenticate, async (req, res) => {
   try {
     const { provider } = req.params;
 
-    const [user] = await db.query(
+    const [userRows] = await db.query(
       `SELECT password FROM users WHERE id = ?`,
       [req.userId]
     );
-    const [providers] = await db.query(
-      "SELECT provider FROM user_providers WHERE user_id = ?",
+
+    const [allProviders] = await db.query(
+      `SELECT provider FROM user_providers WHERE user_id = ?`,
       [req.userId]
     );
 
-    const hasPassword = user[0]?.password && user[0].password !== "";
-    const otherProviders = providers.filter((p) => p.provider !== provider);
+    const hasPassword =
+      !!userRows[0]?.password && userRows[0].password !== "";
+
+    const otherProviders = allProviders.filter((p) => p.provider !== provider);
 
     if (!hasPassword && otherProviders.length === 0) {
       return res.status(400).json({
-        message: "Cannot unlink your only login method. Set a password first.",
+        message:
+          "Cannot unlink your only sign-in method. Set a password first.",
       });
     }
 
     await db.query(
-      "DELETE FROM user_providers WHERE user_id = ? AND provider = ?",
+      `DELETE FROM user_providers WHERE user_id = ? AND provider = ?`,
       [req.userId, provider]
     );
 
     res.json({ message: `${provider} unlinked successfully` });
   } catch (err) {
-    console.error("Unlink error:", err);
+    console.error("DELETE /providers/:provider error:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
 
-// ============ DELETE /me — Delete Account ============
-router.delete('/me', authenticate, async (req, res) => {
+// ── DELETE /me ───────────────────────────────────────────────
+router.delete("/me", authenticate, async (req, res) => {
   try {
-    // Remove linked OAuth providers first (avoids FK constraint errors)
-    await db.query('DELETE FROM user_providers WHERE user_id = ?', [req.userId]);
-
-    // Delete the user account
-    await db.query('DELETE FROM users WHERE id = ?', [req.userId]);
-
-    res.json({ message: 'Account deleted successfully' });
+    // FK cascade handles user_providers, user_sessions, audit_logs
+    await db.query(`DELETE FROM users WHERE id = ?`, [req.userId]);
+    res.json({ message: "Account deleted successfully" });
   } catch (err) {
-    console.error('DELETE /me error:', err);
-    res.status(500).json({ message: 'Server error' });
+    console.error("DELETE /me error:", err);
+    res.status(500).json({ message: "Server error" });
   }
 });
 

@@ -5,21 +5,23 @@ export interface ApiUser {
   id: number;
   name: string;
   email: string;
-  avatar_url?: string | null;
+  role?: string;
+  avatar?: string | null;
   email_verified?: boolean;
   has_password?: boolean;
   providers?: Array<{
     name: string;
+    email?: string | null;
     linkedAt: string;
   }>;
-  created_at?: string;
+  createdAt?: string;
 }
 
 export class ApiError extends Error {
   status: number;
-  data?: any;
+  data?: unknown;
 
-  constructor(message: string, status: number, data?: any) {
+  constructor(message: string, status: number, data?: unknown) {
     super(message);
     this.status = status;
     this.data = data;
@@ -57,7 +59,6 @@ async function request<T>(
   return data as T;
 }
 
-// ============ Generic helpers ============
 export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body?: unknown) =>
@@ -78,7 +79,6 @@ export const api = {
   del: <T>(path: string) => request<T>(path, { method: "DELETE" }),
 };
 
-// ============ Auth API ============
 export const authApi = {
   login: (email: string, password: string) =>
     api.post<{ token: string; user: ApiUser }>("/api/auth/login", {
@@ -94,11 +94,22 @@ export const authApi = {
 
   me: () => api.get<{ user: ApiUser }>("/api/auth/me"),
 
-  updateMe: (data: Partial<Pick<ApiUser, "name" | "avatar_url">>) =>
+  updateMe: (data: Partial<Pick<ApiUser, "name" | "avatar">>) =>
     api.patch<{ user: ApiUser }>("/api/auth/me", data),
 
   unlinkProvider: (provider: string) =>
     api.del<{ message: string }>(`/api/auth/providers/${provider}`),
+
+  setPassword: (password: string) =>
+    api.post<{ message: string }>("/api/auth/set-password", { password }),
+
+  changePassword: (currentPassword: string, newPassword: string) =>
+    api.post<{ message: string }>("/api/auth/change-password", {
+      currentPassword,
+      newPassword,
+    }),
+
+  deleteMe: () => api.del<{ message: string }>("/api/auth/me"),
 };
 
 export { API_URL };
