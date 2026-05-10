@@ -3,20 +3,114 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PATHALYTICS-CAREER</title>
-    <meta name="description" content="PATHALYTICS-CAREER" />
-    <meta name="author" content="Career" />
 
-    <meta property="og:title" content="PATHALYTICS-CAREER App" />
-    <meta property="og:description" content="PATHALYTICS-CAREER Project" />
+    <!-- ═══ PRIMARY META ═══ -->
+    <title>Pathalytics | AI-Powered Career Guidance for CS Students & Tech Professionals</title>
+    <meta
+      name="description"
+      content="Pathalytics helps Computer Science students and tech professionals discover their ideal career path using AI-powered recommendations, personalized roadmaps, and expert mentorship. Start your journey today."
+    />
+    <meta
+      name="keywords"
+      content="AI career guidance, career roadmap, CS career paths, tech career advice, career recommendation, computer science jobs, tech mentorship, software engineering career, career planning tool, career chatbot"
+    />
+    <meta name="author" content="Pathalytics" />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://pathalytics.vercel.app/" />
+
+    <!-- ═══ OPEN GRAPH (Facebook / LinkedIn / WhatsApp) ═══ -->
+    <meta property="og:title" content="Pathalytics — Navigate Your Tech Career with AI" />
+    <meta
+      property="og:description"
+      content="Get AI-powered career recommendations, step-by-step roadmaps, and instant guidance from our career chatbot. Built for CS students and tech professionals aiming for their dream role."
+    />
     <meta property="og:type" content="website" />
-    <meta property="og:image" content="" />
+    <meta property="og:url" content="https://pathalytics.vercel.app/" />
+    <meta property="og:image" content="https://pathalytics.vercel.app/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:site_name" content="Pathalytics" />
+    <meta property="og:locale" content="en_US" />
 
+    <!-- ═══ TWITTER / X CARD ═══ -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:site" content="@PATHALYTICS-CAREER" />
-    <meta name="twitter:image" content="" />
+    <meta name="twitter:site" content="@Pathalytics" />
+    <meta name="twitter:creator" content="@Pathalytics" />
+    <meta name="twitter:title" content="Pathalytics — Navigate Your Tech Career with AI" />
+    <meta
+      name="twitter:description"
+      content="AI-powered career guidance, personalized roadmaps & expert mentorship for CS students and tech professionals. Find your path. Build your future."
+    />
+    <meta name="twitter:image" content="https://pathalytics.vercel.app/og-image.png" />
 
-    <link rel="icon" href="public/favicon.ico" type="image/x-icon" />
+    <!-- ═══ FAVICONS — Circular via SVG mask ═══ -->
+    <!--
+      HOW THE CIRCLE WORKS:
+      • Use a .png favicon with a transparent background (circular shape baked in), OR
+      • Use an SVG favicon with clipPath as below — most modern browsers support it.
+      Replace the href values with your actual asset paths.
+    -->
+
+    <!-- SVG favicon (Chrome, Firefox, Edge — renders perfectly circular) -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <!-- PNG fallback for Safari / older browsers -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+
+    <!-- Apple touch icon (iOS home screen) -->
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+
+    <!-- Web app manifest (optional but recommended) -->
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta name="theme-color" content="#0f172a" />
+
+    <!--
+    ═══════════════════════════════════════════════════════════
+    CIRCULAR LOGO IN YOUR REACT APP
+    ─────────────────────────────────────────────────────────
+    If your logo <img> is inside a React component, add this
+    class or inline style to make it circular:
+
+      <img src="/logo.png" alt="Pathalytics" className="logo-circle" />
+
+    Then in your CSS / Tailwind:
+
+      .logo-circle {
+        border-radius: 50%;
+        object-fit: cover;        /* keeps aspect ratio clean */
+        width: 48px;              /* set your desired size */
+        height: 48px;
+      }
+
+    Or with Tailwind classes:
+      className="rounded-full object-cover w-12 h-12"
+    ═══════════════════════════════════════════════════════════
+    -->
+
+    <!-- ═══ STRUCTURED DATA (Google Rich Results) ═══ -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "Pathalytics",
+        "url": "https://pathalytics.vercel.app/",
+        "description": "AI-powered career guidance platform for Computer Science students and tech professionals.",
+        "publisher": {
+          "@type": "Organization",
+          "name": "Pathalytics",
+          "logo": {
+            "@type": "ImageObject",
+            "url": "https://pathalytics.vercel.app/logo.png"
+          }
+        },
+        "potentialAction": {
+          "@type": "SearchAction",
+          "target": "https://pathalytics.vercel.app/search?q={search_term_string}",
+          "query-input": "required name=search_term_string"
+        }
+      }
+    </script>
   </head>
 
   <body>
