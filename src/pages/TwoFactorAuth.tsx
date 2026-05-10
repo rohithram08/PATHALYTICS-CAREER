@@ -1,6 +1,7 @@
+// src/pages/TwoFactorAuth.tsx
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ShieldCheck, Smartphone, Copy, Check } from 'lucide-react';
+import { ArrowLeft, ShieldCheck, Smartphone, Copy, Check, Loader2 } from 'lucide-react';
 import Layout from '@/components/Layout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,6 +10,7 @@ import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { getCurrentUserId } from '@/lib/userStorage';
+import { useAuth } from '@/hooks/useAuth';
 
 const MOCK_SECRET = 'JBSWY3DPEHPK3PXP';
 const MOCK_BACKUP_CODES = ['8A3F-K29D', '7M4P-Q62X', 'B5TN-W81C', 'D9RL-Y34H', 'F2GJ-Z57V'];
@@ -20,61 +22,132 @@ const TwoFactorAuth = () => {
   const [copied, setCopied] = useState(false);
   const [copiedBackup, setCopiedBackup] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
+
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { user, isLoading } = useAuth();
 
   useEffect(() => {
-    const storedUser = localStorage.getItem('pathlytics_user');
-    if (!storedUser) {
+    if (isLoading) return;
+
+    if (!user) {
       navigate('/login');
       return;
     }
+
     const userId = getCurrentUserId();
+    if (!userId) return;
+
     const twoFAStatus = localStorage.getItem(`pathlytics_2fa_${userId}`);
     setIs2FAEnabled(twoFAStatus === 'enabled');
-  }, [navigate]);
+  }, [isLoading, user, navigate]);
 
   const handleToggle2FA = (checked: boolean) => {
+    const userId = getCurrentUserId();
+
+    if (!userId) {
+      toast({
+        title: 'Authentication error',
+        description: 'Please log in again.',
+        variant: 'destructive',
+      });
+      navigate('/login');
+      return;
+    }
+
     if (checked) {
+      setOtpCode('');
       setSetupStep('verify');
     } else {
-      const userId = getCurrentUserId();
       localStorage.removeItem(`pathlytics_2fa_${userId}`);
       setIs2FAEnabled(false);
       setSetupStep('idle');
-      toast({ title: '2FA Disabled', description: 'Two-factor authentication has been turned off.' });
+      toast({
+        title: '2FA Disabled',
+        description: 'Two-factor authentication has been turned off.',
+      });
     }
   };
 
-  const handleCopySecret = () => {
-    navigator.clipboard.writeText(MOCK_SECRET);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopySecret = async () => {
+    try {
+      await navigator.clipboard.writeText(MOCK_SECRET);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast({
+        title: 'Copy failed',
+        description: 'Could not copy the secret key.',
+        variant: 'destructive',
+      });
+    }
   };
 
-  const handleCopyBackupCodes = () => {
-    navigator.clipboard.writeText(MOCK_BACKUP_CODES.join('\n'));
-    setCopiedBackup(true);
-    setTimeout(() => setCopiedBackup(false), 2000);
+  const handleCopyBackupCodes = async () => {
+    try {
+      await navigator.clipboard.writeText(MOCK_BACKUP_CODES.join('\n'));
+      setCopiedBackup(true);
+      setTimeout(() => setCopiedBackup(false), 2000);
+    } catch {
+      toast({
+        title: 'Copy failed',
+        description: 'Could not copy the backup codes.',
+        variant: 'destructive',
+      });
+    }
   };
 
   const handleVerify = (e: React.FormEvent) => {
     e.preventDefault();
+
     if (otpCode.length !== 6) {
-      toast({ title: 'Invalid code', description: 'Please enter a 6-digit code.', variant: 'destructive' });
+      toast({
+        title: 'Invalid code',
+        description: 'Please enter a 6-digit code.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const userId = getCurrentUserId();
+    if (!userId) {
+      toast({
+        title: 'Authentication error',
+        description: 'Please log in again.',
+        variant: 'destructive',
+      });
+      navigate('/login');
       return;
     }
 
     setIsVerifying(true);
+
     setTimeout(() => {
-      const userId = getCurrentUserId();
       localStorage.setItem(`pathlytics_2fa_${userId}`, 'enabled');
       setIs2FAEnabled(true);
       setIsVerifying(false);
       setSetupStep('backup');
-      toast({ title: '2FA Enabled', description: 'Two-factor authentication is now active.' });
+      toast({
+        title: '2FA Enabled',
+        description: 'Two-factor authentication is now active.',
+      });
     }, 1000);
   };
+
+  if (isLoading) {
+    return (
+      <Layout>
+        <div className="container mx-auto px-4 py-8 max-w-lg">
+          <div className="bg-card rounded-2xl border border-border p-6 flex items-center justify-center min-h-[260px]">
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Loader2 className="w-5 h-5 animate-spin" />
+              <span>Loading security settings...</span>
+            </div>
+          </div>
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout>
@@ -98,7 +171,6 @@ const TwoFactorAuth = () => {
             </div>
           </div>
 
-          {/* Toggle */}
           <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50 mb-6">
             <div className="flex items-center gap-3">
               <Smartphone className="w-5 h-5 text-muted-foreground" />
@@ -112,19 +184,22 @@ const TwoFactorAuth = () => {
             <Switch checked={is2FAEnabled} onCheckedChange={handleToggle2FA} />
           </div>
 
-          {/* Setup: Verify Step */}
           {setupStep === 'verify' && !is2FAEnabled && (
             <div className="space-y-5">
               <Separator />
               <div>
                 <h2 className="font-semibold text-foreground mb-1">Set up Authenticator</h2>
                 <p className="text-sm text-muted-foreground mb-4">
-                  Open your authenticator app (e.g. Google Authenticator) and enter this secret key:
+                  Open your authenticator app and enter this secret key:
                 </p>
 
                 <div className="flex items-center gap-2 p-3 rounded-lg bg-muted border border-border font-mono text-sm text-foreground">
                   <span className="flex-1 tracking-widest">{MOCK_SECRET}</span>
-                  <button onClick={handleCopySecret} className="text-muted-foreground hover:text-foreground">
+                  <button
+                    type="button"
+                    onClick={handleCopySecret}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
                     {copied ? <Check className="w-4 h-4 text-success" /> : <Copy className="w-4 h-4" />}
                   </button>
                 </div>
@@ -144,6 +219,7 @@ const TwoFactorAuth = () => {
                     className="text-center tracking-[0.5em] text-lg font-mono"
                   />
                 </div>
+
                 <Button
                   type="submit"
                   disabled={isVerifying || otpCode.length !== 6}
@@ -155,7 +231,6 @@ const TwoFactorAuth = () => {
             </div>
           )}
 
-          {/* Backup Codes Step */}
           {setupStep === 'backup' && is2FAEnabled && (
             <div className="space-y-5">
               <Separator />
@@ -174,6 +249,7 @@ const TwoFactorAuth = () => {
                 </div>
 
                 <Button
+                  type="button"
                   variant="outline"
                   onClick={handleCopyBackupCodes}
                   className="w-full mt-3 gap-2"
@@ -184,6 +260,7 @@ const TwoFactorAuth = () => {
               </div>
 
               <Button
+                type="button"
                 onClick={() => {
                   setSetupStep('idle');
                   navigate('/settings');
@@ -195,7 +272,6 @@ const TwoFactorAuth = () => {
             </div>
           )}
 
-          {/* Already enabled, idle */}
           {is2FAEnabled && setupStep === 'idle' && (
             <div className="text-center py-4">
               <div className="w-12 h-12 rounded-full bg-success/10 flex items-center justify-center mx-auto mb-3">
