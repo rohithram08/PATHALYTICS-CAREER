@@ -13,8 +13,14 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
@@ -45,7 +51,13 @@ interface SectionProps {
   children: React.ReactNode;
 }
 
-const SettingsSection = ({ icon: Icon, iconClass, title, description, children }: SectionProps) => (
+const SettingsSection = ({
+  icon: Icon,
+  iconClass,
+  title,
+  description,
+  children,
+}: SectionProps) => (
   <section className="bg-card rounded-2xl border border-border p-6">
     <header className="flex items-start gap-3 mb-6">
       <div className={cn('w-10 h-10 rounded-lg flex items-center justify-center shrink-0', iconClass)}>
@@ -66,7 +78,7 @@ const SettingsSkeleton = () => (
       <Skeleton className="h-8 w-32 mb-2" />
       <Skeleton className="h-4 w-64 mb-8" />
       <div className="space-y-6">
-        {[1, 2, 3].map(i => (
+        {[1, 2, 3].map((i) => (
           <div key={i} className="bg-card rounded-2xl border border-border p-6">
             <Skeleton className="h-6 w-40 mb-4" />
             <Skeleton className="h-32" />
@@ -101,12 +113,19 @@ const Settings = () => {
 
   useEffect(() => {
     if (!user) return;
+
     const storedImg = localStorage.getItem(userKey('profile_image')) || user.avatar || null;
     let storedNotifs: NotificationPrefs = DEFAULT_NOTIFS;
     const raw = localStorage.getItem(userKey(NOTIF_KEY));
+
     if (raw) {
-      try { storedNotifs = { ...DEFAULT_NOTIFS, ...JSON.parse(raw) }; } catch { /* noop */ }
+      try {
+        storedNotifs = { ...DEFAULT_NOTIFS, ...JSON.parse(raw) };
+      } catch {
+        // noop
+      }
     }
+
     setName(user.name || '');
     setEmail(user.email || '');
     setRole(user.role || 'Student');
@@ -124,35 +143,55 @@ const Settings = () => {
     if (!isLoading && !user) navigate('/login');
   }, [isLoading, user, navigate]);
 
-  const isDirty = useMemo(() => (
-    name !== baseline.name ||
-    role !== baseline.role ||
-    profileImage !== baseline.profileImage ||
-    JSON.stringify(notifications) !== JSON.stringify(baseline.notifications)
-  ), [name, role, profileImage, notifications, baseline]);
+  const isDirty = useMemo(
+    () =>
+      name !== baseline.name ||
+      role !== baseline.role ||
+      profileImage !== baseline.profileImage ||
+      JSON.stringify(notifications) !== JSON.stringify(baseline.notifications),
+    [name, role, profileImage, notifications, baseline]
+  );
 
   useEffect(() => {
     if (!isDirty) return;
-    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
   }, [isDirty]);
 
-  const processAvatarFile = useCallback((file: File) => {
-    if (!file.type.startsWith('image/')) {
-      toast({ title: 'Unsupported file', description: 'Please choose an image file.', variant: 'destructive' });
-      return;
-    }
-    if (file.size > MAX_AVATAR_BYTES) {
-      toast({ title: 'Image too large', description: 'Max size is 2 MB.', variant: 'destructive' });
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') setProfileImage(reader.result);
-    };
-    reader.readAsDataURL(file);
-  }, [toast]);
+  const processAvatarFile = useCallback(
+    (file: File) => {
+      if (!file.type.startsWith('image/')) {
+        toast({
+          title: 'Unsupported file',
+          description: 'Please choose an image file.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      if (file.size > MAX_AVATAR_BYTES) {
+        toast({
+          title: 'Image too large',
+          description: 'Max size is 2 MB.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') setProfileImage(reader.result);
+      };
+      reader.readAsDataURL(file);
+    },
+    [toast]
+  );
 
   const handleAvatarInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -169,33 +208,59 @@ const Settings = () => {
 
   const handleSave = useCallback(async () => {
     if (!user || !isDirty) return;
+
+    if (!token) {
+      toast({
+        title: 'Authentication error',
+        description: 'Please log in again.',
+        variant: 'destructive',
+      });
+      navigate('/login');
+      return;
+    }
+
     setIsSaving(true);
+
     try {
       const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/me`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
           name: name.trim(),
           avatar: profileImage || null,
           notifications,
         }),
       });
+
       if (!res.ok) throw new Error('Failed to update profile');
 
       updateUser({ name: name.trim(), avatar: profileImage || undefined });
       localStorage.setItem(userKey(NOTIF_KEY), JSON.stringify(notifications));
+
       const imgKey = userKey('profile_image');
       if (profileImage) localStorage.setItem(imgKey, profileImage);
       else localStorage.removeItem(imgKey);
+
       window.dispatchEvent(new Event('pathlytics_user:updated'));
       setBaseline({ name: name.trim(), role, profileImage, notifications });
-      toast({ title: 'Changes saved', description: 'Your profile has been updated.' });
+
+      toast({
+        title: 'Changes saved',
+        description: 'Your profile has been updated.',
+      });
     } catch {
-      toast({ title: 'Save failed', description: 'Could not update your profile. Please try again.', variant: 'destructive' });
+      toast({
+        title: 'Save failed',
+        description: 'Could not update your profile. Please try again.',
+        variant: 'destructive',
+      });
     } finally {
       setIsSaving(false);
     }
-  }, [user, isDirty, name, role, profileImage, notifications, token, updateUser, toast]);
+  }, [user, isDirty, name, role, profileImage, notifications, token, updateUser, toast, navigate]);
 
   const handleDiscard = () => {
     setName(baseline.name);
@@ -212,6 +277,7 @@ const Settings = () => {
         if (isDirty && !isSaving) handleSave();
       }
     };
+
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [isDirty, isSaving, handleSave]);
@@ -224,23 +290,42 @@ const Settings = () => {
     navigate('/');
   };
 
-  // ✅ FIX: handleDeleteAccount with useCallback, isDeleting guard, and full dep array
   const handleDeleteAccount = useCallback(async () => {
     if (isDeleting) return;
+
+    if (!token) {
+      toast({
+        title: 'Authentication error',
+        description: 'Please log in again.',
+        variant: 'destructive',
+      });
+      navigate('/login');
+      return;
+    }
+
     setIsDeleting(true);
+
     try {
       const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/me`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
       });
+
       if (!res.ok) throw new Error('Delete failed');
 
       localStorage.removeItem(userKey('profile_image'));
       localStorage.removeItem(userKey(NOTIF_KEY));
       window.dispatchEvent(new Event('pathlytics_user:updated'));
+
       logout();
       navigate('/');
-      toast({ title: 'Account deleted', description: 'Your account has been permanently deleted.' });
+
+      toast({
+        title: 'Account deleted',
+        description: 'Your account has been permanently deleted.',
+      });
     } catch {
       toast({
         title: 'Delete failed',
@@ -253,7 +338,10 @@ const Settings = () => {
   }, [isDeleting, token, logout, navigate, toast]);
 
   const joinDate = user?.createdAt
-    ? new Date(user.createdAt).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+    ? new Date(user.createdAt).toLocaleDateString('en-US', {
+        month: 'long',
+        year: 'numeric',
+      })
     : null;
 
   const initial = (name || user?.name || 'U').charAt(0).toUpperCase();
@@ -262,83 +350,140 @@ const Settings = () => {
 
   return (
     <Layout>
-      <div className={cn("container mx-auto px-4 py-8 max-w-3xl", isDirty ? "pb-32" : "pb-8")}>
+      <div className={cn('container mx-auto px-4 py-8 max-w-3xl', isDirty ? 'pb-32' : 'pb-8')}>
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-foreground mb-2">Settings</h1>
           <p className="text-muted-foreground">Manage your account, preferences, and security.</p>
         </div>
 
         <div className="space-y-6">
-          {/* PROFILE */}
-          <SettingsSection icon={User} iconClass="bg-primary/10 text-primary" title="Profile" description="This is how others will see you on the platform.">
+          <SettingsSection
+            icon={User}
+            iconClass="bg-primary/10 text-primary"
+            title="Profile"
+            description="This is how others will see you on the platform."
+          >
             <div className="grid gap-6 sm:grid-cols-[180px_1fr]">
-              {/* Avatar */}
               <div className="space-y-3">
                 <div
-                  onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setIsDragging(true);
+                  }}
                   onDragLeave={() => setIsDragging(false)}
                   onDrop={handleAvatarDrop}
                   onClick={() => fileInputRef.current?.click()}
-                  role="button" tabIndex={0}
-                  onKeyDown={(e) => { if (e.key === 'Enter') fileInputRef.current?.click(); }}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') fileInputRef.current?.click();
+                  }}
                   aria-label="Upload profile photo"
                   className={cn(
                     'group relative rounded-2xl border-2 border-dashed bg-muted/40 p-4 cursor-pointer transition-all',
-                    isDragging ? 'border-primary bg-primary/5 scale-[1.02]' : 'border-border hover:border-primary/50 hover:bg-muted/60'
+                    isDragging
+                      ? 'border-primary bg-primary/5 scale-[1.02]'
+                      : 'border-border hover:border-primary/50 hover:bg-muted/60'
                   )}
                 >
-                  {profileImage
-                    ? <img src={profileImage} alt="Profile" className="mx-auto h-32 w-32 rounded-full object-cover" />
-                    : <div className="mx-auto flex h-32 w-32 items-center justify-center rounded-full bg-gradient-to-br from-primary to-accent text-5xl font-bold text-primary-foreground">{initial}</div>
-                  }
+                  {profileImage ? (
+                    <img
+                      src={profileImage}
+                      alt="Profile"
+                      className="mx-auto h-32 w-32 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="mx-auto flex h-32 w-32 items-center justify-center rounded-full bg-gradient-to-br from-primary to-accent text-5xl font-bold text-primary-foreground">
+                      {initial}
+                    </div>
+                  )}
+
                   <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-background/70 opacity-0 group-hover:opacity-100 transition-opacity">
                     <div className="flex flex-col items-center gap-1 text-foreground">
                       <Camera className="w-6 h-6" />
-                      <span className="text-xs font-medium">{isDragging ? 'Drop image' : 'Change photo'}</span>
+                      <span className="text-xs font-medium">
+                        {isDragging ? 'Drop image' : 'Change photo'}
+                      </span>
                     </div>
                   </div>
                 </div>
-                <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarInput} />
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleAvatarInput}
+                />
+
                 <div className="flex flex-col gap-1.5">
-                  <Button type="button" size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} className="w-full">
-                    <Upload className="w-3.5 h-3.5 mr-2" /> Upload photo
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full"
+                  >
+                    <Upload className="w-3.5 h-3.5 mr-2" />
+                    Upload photo
                   </Button>
+
                   {profileImage && (
-                    <Button type="button" size="sm" variant="ghost" onClick={() => setProfileImage(null)} className="w-full text-destructive hover:text-destructive">
-                      <Trash2 className="w-3.5 h-3.5 mr-2" /> Remove
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setProfileImage(null)}
+                      className="w-full text-destructive hover:text-destructive"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 mr-2" />
+                      Remove
                     </Button>
                   )}
+
                   <p className="text-[11px] text-muted-foreground text-center">JPG, PNG · max 2 MB</p>
                 </div>
               </div>
 
-              {/* Form */}
               <div className="space-y-5 min-w-0">
                 <div className="grid gap-2">
                   <Label htmlFor="name">Full name</Label>
-                  <Input id="name" value={name} onChange={(e) => setName(e.target.value)} maxLength={60} placeholder="Your name" />
+                  <Input
+                    id="name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    maxLength={60}
+                    placeholder="Your name"
+                  />
                   <p className="text-[11px] text-muted-foreground">{name.length}/60 characters</p>
                 </div>
+
                 <div className="grid gap-2">
                   <Label htmlFor="email" className="flex items-center justify-between">
                     Email
-                    <span className="text-[11px] font-normal text-muted-foreground">Verified · contact support to change</span>
+                    <span className="text-[11px] font-normal text-muted-foreground">
+                      Verified · contact support to change
+                    </span>
                   </Label>
                   <div className="relative">
                     <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                     <Input id="email" value={email} disabled className="pl-10" />
                   </div>
                 </div>
+
                 <div className="grid gap-2">
                   <Label htmlFor="role" className="flex items-center justify-between">
                     Role
-                    <span className="text-[11px] font-normal text-muted-foreground">Set during signup</span>
+                    <span className="text-[11px] font-normal text-muted-foreground">
+                      Set during signup
+                    </span>
                   </Label>
                   <div className="relative">
                     <GraduationCap className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                     <Input id="role" value={role} disabled className="pl-10" />
                   </div>
                 </div>
+
                 {joinDate && (
                   <div className="flex items-center gap-1.5 text-xs text-muted-foreground pt-1">
                     <Calendar className="w-3.5 h-3.5" />
@@ -349,15 +494,34 @@ const Settings = () => {
             </div>
           </SettingsSection>
 
-          {/* NOTIFICATIONS */}
-          <SettingsSection icon={Bell} iconClass="bg-accent/10 text-accent" title="Notifications" description="Choose what you want to hear about.">
+          <SettingsSection
+            icon={Bell}
+            iconClass="bg-accent/10 text-accent"
+            title="Notifications"
+            description="Choose what you want to hear about."
+          >
             <div className="divide-y divide-border">
               {[
-                { key: 'email' as const, title: 'Email notifications', desc: 'Account activity, security alerts, and important updates.' },
-                { key: 'product' as const, title: 'Product updates', desc: 'New features, roadmap releases, and platform improvements.' },
-                { key: 'weeklyDigest' as const, title: 'Weekly career digest', desc: 'Curated career tips and recommended roadmaps every Monday.' },
+                {
+                  key: 'email' as const,
+                  title: 'Email notifications',
+                  desc: 'Account activity, security alerts, and important updates.',
+                },
+                {
+                  key: 'product' as const,
+                  title: 'Product updates',
+                  desc: 'New features, roadmap releases, and platform improvements.',
+                },
+                {
+                  key: 'weeklyDigest' as const,
+                  title: 'Weekly career digest',
+                  desc: 'Curated career tips and recommended roadmaps every Monday.',
+                },
               ].map((opt) => (
-                <div key={opt.key} className="flex items-start justify-between gap-4 py-4 first:pt-0 last:pb-0">
+                <div
+                  key={opt.key}
+                  className="flex items-start justify-between gap-4 py-4 first:pt-0 last:pb-0"
+                >
                   <div className="min-w-0">
                     <p className="font-medium text-foreground">{opt.title}</p>
                     <p className="text-sm text-muted-foreground">{opt.desc}</p>
@@ -372,7 +536,6 @@ const Settings = () => {
             </div>
           </SettingsSection>
 
-          {/* SECURITY */}
           <SettingsSection
             icon={Shield}
             iconClass="bg-success/10 text-success"
@@ -381,8 +544,18 @@ const Settings = () => {
           >
             <div className="space-y-2">
               {[
-                { label: 'Password', desc: 'Change your password', icon: KeyRound, path: '/change-password' },
-                { label: 'Two-factor authentication', desc: 'Add an extra verification step', icon: Smartphone, path: '/two-factor-auth' },
+                {
+                  label: 'Password',
+                  desc: 'Change your password',
+                  icon: KeyRound,
+                  path: '/change-password',
+                },
+                {
+                  label: 'Two-factor authentication',
+                  desc: 'Add an extra verification step',
+                  icon: Smartphone,
+                  path: '/two-factor-auth',
+                },
               ].map((item) => (
                 <button
                   key={item.label}
@@ -405,7 +578,6 @@ const Settings = () => {
             </div>
           </SettingsSection>
 
-          {/* LOGOUT */}
           <div className="bg-card rounded-2xl border border-border p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center">
@@ -416,12 +588,15 @@ const Settings = () => {
                 <p className="text-sm text-muted-foreground">You'll need to sign in again on this device.</p>
               </div>
             </div>
+
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button variant="outline" size="sm">
-                  <LogOut className="w-4 h-4 mr-2" /> Log out
+                  <LogOut className="w-4 h-4 mr-2" />
+                  Log out
                 </Button>
               </AlertDialogTrigger>
+
               <AlertDialogContent>
                 <AlertDialogHeader>
                   <AlertDialogTitle>Log out of Pathalytics?</AlertDialogTitle>
@@ -431,6 +606,7 @@ const Settings = () => {
                       : "You'll need to sign in again to access your account."}
                   </AlertDialogDescription>
                 </AlertDialogHeader>
+
                 <AlertDialogFooter>
                   <AlertDialogCancel>Cancel</AlertDialogCancel>
                   <AlertDialogAction onClick={handleLogout}>Log out</AlertDialogAction>
@@ -439,8 +615,12 @@ const Settings = () => {
             </AlertDialog>
           </div>
 
-          {/* DANGER ZONE */}
-          <SettingsSection icon={AlertTriangle} iconClass="bg-destructive/10 text-destructive" title="Danger zone" description="Irreversible actions — proceed carefully.">
+          <SettingsSection
+            icon={AlertTriangle}
+            iconClass="bg-destructive/10 text-destructive"
+            title="Danger zone"
+            description="Irreversible actions — proceed carefully."
+          >
             <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
                 <p className="font-medium text-foreground">Delete account</p>
@@ -448,30 +628,36 @@ const Settings = () => {
                   Permanently delete your account and all associated data. This cannot be undone.
                 </p>
               </div>
+
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <Button variant="destructive" size="sm">
-                    <Trash2 className="w-4 h-4 mr-2" /> Delete account
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Delete account
                   </Button>
                 </AlertDialogTrigger>
+
                 <AlertDialogContent>
                   <AlertDialogHeader>
                     <AlertDialogTitle>Delete your account?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      All your data — saved careers, roadmaps, chat history — will be permanently deleted. This action cannot be undone.
+                      All your data — saved careers, roadmaps, chat history — will be permanently
+                      deleted. This action cannot be undone.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
+
                   <AlertDialogFooter>
-                    {/* ✅ FIX: Cancel disabled during deletion */}
                     <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-                    {/* ✅ FIX: onClick wired + loading state */}
                     <AlertDialogAction
                       onClick={handleDeleteAccount}
                       disabled={isDeleting}
                       className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
                     >
                       {isDeleting ? (
-                        <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Deleting...</>
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Deleting...
+                        </>
                       ) : (
                         'Yes, delete my account'
                       )}
@@ -484,7 +670,6 @@ const Settings = () => {
         </div>
       </div>
 
-      {/* STICKY SAVE BAR */}
       {isDirty && (
         <div
           className="fixed bottom-0 inset-x-0 z-40 border-t border-border bg-background/95 backdrop-blur-md shadow-[0_-4px_20px_rgba(0,0,0,0.08)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.4)] animate-in slide-in-from-bottom duration-200"
@@ -499,20 +684,30 @@ const Settings = () => {
                 ⌘S
               </kbd>
             </div>
+
             <div className="flex gap-2 shrink-0">
               <Button variant="ghost" size="sm" onClick={handleDiscard} disabled={isSaving}>
-                <X className="w-3.5 h-3.5 mr-1" /> Discard
+                <X className="w-3.5 h-3.5 mr-1" />
+                Discard
               </Button>
+
               <Button
                 size="sm"
                 onClick={handleSave}
                 disabled={isSaving}
                 className="min-w-[140px] bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-500 dark:hover:bg-blue-600"
               >
-                {isSaving
-                  ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Saving...</>
-                  : <><Check className="w-4 h-4 mr-2" /> Save changes</>
-                }
+                {isSaving ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4 mr-2" />
+                    Save changes
+                  </>
+                )}
               </Button>
             </div>
           </div>
