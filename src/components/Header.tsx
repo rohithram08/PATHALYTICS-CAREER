@@ -14,7 +14,6 @@ import {
   GraduationCap,
   Lightbulb,
   Newspaper,
-  Trophy,
   Bot,
   Map,
   Info,
@@ -87,7 +86,7 @@ const Header = () => {
 
   const Logo = () => (
     <>
-      <img src={favicon} alt="Pathalytics Logo" className="w-8 h-8 object-cover rounded-full" />
+      <img src="/favicon.svg" alt="Pathalytics Logo" className="w-8 h-8 object-cover rounded-full" />
       <span className="text-base font-bold tracking-tight">
         Path<span className="gradient-text">alytics</span>
       </span>

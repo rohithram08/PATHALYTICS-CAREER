@@ -156,7 +156,7 @@ const Footer = () => {
           {/* Brand column */}
           <div className="col-span-2 md:col-span-1">
             <Link to="/" className="flex items-center gap-2 mb-4">
-              <img src={favicon} alt="Pathalytics Logo" className="w-8 h-8 object-cover rounded-full" />
+              <img src="/favicon.svg" alt="Pathalytics Logo" className="w-8 h-8 object-cover rounded-full" />
               <span className="font-bold text-lg">Pathalytics</span>
             </Link>
             <p className="text-sm text-muted-foreground mb-3 leading-relaxed">

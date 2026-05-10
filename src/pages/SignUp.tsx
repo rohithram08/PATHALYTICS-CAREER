@@ -175,7 +175,7 @@ const SignUp = () => {
         >
           <Link to="/" className="flex items-center gap-2 mb-10">
             <img
-              src={favicon}
+              src="/favicon.svg"
               alt="Pathalytics Logo"
               className="w-10 h-10 object-contain"
             />
