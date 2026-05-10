@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Sparkles, RefreshCw } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Send, Bot, User, Sparkles, RefreshCw, ArrowLeft } from 'lucide-react';
 import Layout from '@/components/Layout';
 import { Button } from '@/components/ui/button';
 import { userKey } from '@/lib/userStorage';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { useAuth } from '@/hooks/useAuth';
 
 interface Message {
   id: number;
@@ -13,7 +15,7 @@ interface Message {
   timestamp: Date;
 }
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_CHATBOT_URL || 'http://localhost:8000';
 
 const quickQuestions = [
   'What career is best for me?',
@@ -24,67 +26,96 @@ const quickQuestions = [
   'Best resources for learning coding?',
 ];
 
+const initialMessage: Message = {
+  id: 1,
+  role: 'assistant',
+  content:
+    "Hello! I'm your AI Career Mentor. 👋\n\nI'm here to help you navigate your career journey in tech. Whether you're exploring career options, learning new skills, or preparing for interviews, I've got you covered.\n\nHow can I assist you today?",
+  timestamp: new Date(),
+};
+
 const Chatbot = () => {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 1,
-      role: 'assistant',
-      content:
-        "Hello! I'm your AI Career Mentor. 👋\n\nI'm here to help you navigate your career journey in tech. Whether you're exploring career options, learning new skills, or preparing for interviews, I've got you covered.\n\nHow can I assist you today?",
-      timestamp: new Date(),
-    },
-  ]);
+  const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
+
+  const [messages, setMessages] = useState<Message[]>([initialMessage]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    const viewport = scrollRef.current?.querySelector(
+      '[data-radix-scroll-area-viewport]'
+    ) as HTMLElement | null;
+
+    if (viewport) {
+      viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' });
     }
-  }, [messages]);
+  }, [messages, isTyping]);
+
+  const sessionIdRef = useRef<string>('');
+  if (!sessionIdRef.current) {
+    const key = userKey('pathalytics_session');
+    let stored = localStorage.getItem(key);
+    if (!stored) {
+      stored = crypto.randomUUID();
+      localStorage.setItem(key, stored);
+    }
+    sessionIdRef.current = stored;
+  }
 
   const handleSend = async (text?: string) => {
     const messageText = text || input;
-    if (!messageText.trim()) return;
+    if (!messageText.trim() || isTyping) return;
 
     const userMessage: Message = {
-      id: messages.length + 1,
+      id: Date.now(),
       role: 'user',
-      content: messageText,
+      content: messageText.trim(),
       timestamp: new Date(),
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    const newMessages = [...messages, userMessage];
+    setMessages(newMessages);
     setInput('');
     setIsTyping(true);
 
     try {
-      const sessionId = localStorage.getItem(userKey('pathalytics_session')) || 'default';
       const res = await fetch(`${API_BASE}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: messageText,
+          message: messageText.trim(),
+          history: newMessages.map((m) => ({
+            role: m.role,
+            content: m.content,
+          })),
           current_page: window.location.pathname,
           user_level: 'intermediate',
-          session_id: 'browser-' + sessionId,
+          session_id: `browser-${sessionIdRef.current}`,
         }),
       });
 
+      if (!res.ok) {
+        throw new Error('Failed to fetch chatbot response');
+      }
+
       const data = await res.json();
+
       const botMessage: Message = {
-        id: messages.length + 2,
+        id: Date.now() + 1,
         role: 'assistant',
-        content: data.reply,
+        content: data?.reply || 'Sorry, I could not generate a response right now.',
         timestamp: new Date(),
       };
+
       setMessages((prev) => [...prev, botMessage]);
     } catch {
       const botMessage: Message = {
-        id: messages.length + 2,
+        id: Date.now() + 1,
         role: 'assistant',
-        content: 'Sorry, I had trouble reaching the server. Please try again.',
+        content:
+          'Sorry, I had trouble reaching the server. Please try again in a moment.',
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, botMessage]);
@@ -101,43 +132,56 @@ const Chatbot = () => {
   };
 
   const handleReset = () => {
-    setMessages([
-      {
-        id: 1,
-        role: 'assistant',
-        content:
-          "Hello! I'm your AI Career Mentor. 👋\n\nI'm here to help you navigate your career journey in tech. Whether you're exploring career options, learning new skills, or preparing for interviews, I've got you covered.\n\nHow can I assist you today?",
-        timestamp: new Date(),
-      },
-    ]);
+    setMessages([{ ...initialMessage, timestamp: new Date() }]);
+    setInput('');
+    setIsTyping(false);
+  };
+
+  const handleBack = () => {
+    if (window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    navigate(isAuthenticated ? '/dashboard' : '/');
   };
 
   return (
-    <Layout showFooter={false}>
-      <div className="h-[calc(100vh-5rem)] flex flex-col">
-        <div className="container mx-auto px-4 py-4 flex-1 flex flex-col max-w-4xl">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-primary flex items-center justify-center">
+    <Layout showFooter={true} noPadding>
+      <div className="h-[calc(100vh-4rem)] md:h-[calc(100vh-4.5rem)] flex flex-col bg-background">
+        <div className="container mx-auto px-4 py-4 flex-1 flex flex-col max-w-4xl w-full overflow-hidden">
+          <div className="flex items-center justify-between mb-4 shrink-0 gap-2">
+            <div className="flex items-center gap-3 min-w-0">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleBack}
+                className="shrink-0"
+                title="Go back"
+                aria-label="Go back"
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </Button>
+
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center shrink-0">
                 <Bot className="w-5 h-5 text-primary-foreground" />
               </div>
-              <div>
-                <h1 className="font-bold text-foreground">Career Mentor AI</h1>
+
+              <div className="min-w-0">
+                <h1 className="font-bold text-foreground truncate">Career Mentor AI</h1>
                 <p className="text-xs text-success flex items-center gap-1">
                   <span className="w-2 h-2 rounded-full bg-success animate-pulse" />
                   Online
                 </p>
               </div>
             </div>
-            <Button variant="outline" size="sm" onClick={handleReset}>
+
+            <Button variant="outline" size="sm" onClick={handleReset} className="shrink-0">
               <RefreshCw className="w-4 h-4 mr-2" />
-              New Chat
+              <span className="hidden sm:inline">New Chat</span>
             </Button>
           </div>
 
-          {/* Chat Area */}
-          <div className="flex-1 bg-card rounded-2xl border border-border overflow-hidden flex flex-col">
+          <div className="flex-1 bg-card rounded-2xl border border-border overflow-hidden flex flex-col min-h-0">
             <ScrollArea className="flex-1 p-4" ref={scrollRef}>
               <div className="space-y-4">
                 {messages.map((message) => (
@@ -160,6 +204,7 @@ const Chatbot = () => {
                         <User className="w-4 h-4" />
                       )}
                     </div>
+
                     <div
                       className={`max-w-[80%] rounded-2xl px-4 py-3 ${
                         message.role === 'assistant'
@@ -167,15 +212,20 @@ const Chatbot = () => {
                           : 'bg-primary text-primary-foreground'
                       }`}
                     >
-                      <div className="whitespace-pre-wrap text-sm leading-relaxed">
+                      <div className="whitespace-pre-wrap text-sm leading-relaxed break-words">
                         {message.content}
                       </div>
                       <p
                         className={`text-xs mt-2 ${
-                          message.role === 'assistant' ? 'text-muted-foreground' : 'text-primary-foreground/70'
+                          message.role === 'assistant'
+                            ? 'text-muted-foreground'
+                            : 'text-primary-foreground/70'
                         }`}
                       >
-                        {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {message.timestamp.toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
                       </p>
                     </div>
                   </div>
@@ -189,8 +239,8 @@ const Chatbot = () => {
                     <div className="bg-muted rounded-2xl px-4 py-3">
                       <div className="flex gap-1">
                         <span className="w-2 h-2 rounded-full bg-muted-foreground animate-bounce" />
-                        <span className="w-2 h-2 rounded-full bg-muted-foreground animate-bounce animation-delay-100" />
-                        <span className="w-2 h-2 rounded-full bg-muted-foreground animate-bounce animation-delay-200" />
+                        <span className="w-2 h-2 rounded-full bg-muted-foreground animate-bounce [animation-delay:0.1s]" />
+                        <span className="w-2 h-2 rounded-full bg-muted-foreground animate-bounce [animation-delay:0.2s]" />
                       </div>
                     </div>
                   </div>
@@ -198,27 +248,28 @@ const Chatbot = () => {
               </div>
             </ScrollArea>
 
-            {/* Quick Questions */}
-            <div className="px-4 py-3 border-t border-border">
-              <div className="flex items-center gap-2 mb-2">
-                <Sparkles className="w-4 h-4 text-accent" />
-                <span className="text-xs text-muted-foreground">Quick questions</span>
+            {messages.length <= 1 && (
+              <div className="px-4 py-3 border-t border-border shrink-0">
+                <div className="flex items-center gap-2 mb-2">
+                  <Sparkles className="w-4 h-4 text-accent" />
+                  <span className="text-xs text-muted-foreground">Quick questions</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {quickQuestions.map((question) => (
+                    <button
+                      key={question}
+                      type="button"
+                      onClick={() => handleSend(question)}
+                      className="text-xs px-3 py-1.5 rounded-full bg-muted hover:bg-primary hover:text-primary-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+                    >
+                      {question}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {quickQuestions.map((question) => (
-                  <button
-                    key={question}
-                    onClick={() => handleSend(question)}
-                    className="text-xs px-3 py-1.5 rounded-full bg-muted hover:bg-primary hover:text-primary-foreground transition-colors"
-                  >
-                    {question}
-                  </button>
-                ))}
-              </div>
-            </div>
+            )}
 
-            {/* Input Area */}
-            <div className="p-4 border-t border-border">
+            <div className="p-4 border-t border-border shrink-0">
               <div className="flex gap-3">
                 <Textarea
                   placeholder="Ask me anything about your career..."
@@ -231,11 +282,15 @@ const Chatbot = () => {
                 <Button
                   onClick={() => handleSend()}
                   disabled={!input.trim() || isTyping}
-                  className="bg-gradient-primary hover:opacity-90 transition-opacity"
+                  className="bg-gradient-to-br from-primary to-accent hover:opacity-90 transition-opacity self-end"
+                  aria-label="Send message"
                 >
                   <Send className="w-4 h-4" />
                 </Button>
               </div>
+              <p className="text-[10px] text-muted-foreground mt-1.5 text-center">
+                Press Enter to send · Shift+Enter for new line
+              </p>
             </div>
           </div>
         </div>

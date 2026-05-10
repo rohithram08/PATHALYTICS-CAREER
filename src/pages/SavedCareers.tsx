@@ -1,16 +1,23 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Bookmark, Trash2, TrendingUp, DollarSign, ChevronRight } from 'lucide-react';
+import { Bookmark, Trash2, TrendingUp, Wallet, ChevronRight } from 'lucide-react';
 import Layout from '@/components/Layout';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { getSavedCareers, removeSavedCareer, SavedCareerEntry } from '@/lib/savedCareers';
 import { roadmaps } from '@/data/careers';
+import { useUserLocale } from '@/hooks/useUserLocale';
+import { localizeSalaryString } from '@/lib/localeSalary';
+import { CountrySelector } from '@/components/CountrySelector';
+import { getCountryInfo } from '@/lib/locale';
 
 const SavedCareers = () => {
   const [savedEntries, setSavedEntries] = useState<SavedCareerEntry[]>(getSavedCareers);
+  const [experienceLevel, setExperienceLevel] = useState<'fresher' | 'experienced'>('fresher');
   const { toast } = useToast();
+  const { country } = useUserLocale();
+  const countryInfo = getCountryInfo(country);
 
   const savedRoadmaps = savedEntries
     .map((entry) => {
@@ -31,12 +38,42 @@ const SavedCareers = () => {
   return (
     <Layout>
       <div className="container mx-auto px-4 py-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-foreground mb-2">Saved Careers</h1>
-          <p className="text-muted-foreground">
-            Your bookmarked careers for future reference.
-          </p>
+        {/* Header with country selector */}
+        <div className="mb-8 flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-foreground mb-2">Saved Careers</h1>
+            <p className="text-muted-foreground">
+              Your bookmarked careers for future reference.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <CountrySelector />
+          </div>
         </div>
+
+        {savedRoadmaps.length > 0 && (
+          <div className="bg-card border border-border rounded-2xl p-4 mb-6 flex flex-wrap items-center gap-3">
+            <span className="text-sm text-muted-foreground">
+              Showing salaries in <strong className="text-foreground">{countryInfo.currency}</strong> for:
+            </span>
+            <Button
+              variant={experienceLevel === 'fresher' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setExperienceLevel('fresher')}
+              className="rounded-full"
+            >
+              👶 Fresher
+            </Button>
+            <Button
+              variant={experienceLevel === 'experienced' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setExperienceLevel('experienced')}
+              className="rounded-full"
+            >
+              💼 Experienced
+            </Button>
+          </div>
+        )}
 
         {savedRoadmaps.length === 0 ? (
           <div className="text-center py-16">
@@ -55,6 +92,12 @@ const SavedCareers = () => {
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             {savedRoadmaps.map((roadmap, index) => {
               const IconComponent = roadmap.icon;
+              const localSalary = localizeSalaryString(
+                roadmap.salary,
+                country,
+                experienceLevel
+              );
+
               return (
                 <div
                   key={roadmap.id}
@@ -73,6 +116,7 @@ const SavedCareers = () => {
                     <button
                       onClick={() => handleRemove(roadmap.id, roadmap.title)}
                       className="p-2 rounded-lg hover:bg-destructive/10 text-destructive transition-colors"
+                      title="Remove from saved"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -83,8 +127,8 @@ const SavedCareers = () => {
 
                   <div className="flex items-center gap-4 mb-4">
                     <div className="flex items-center gap-1 text-sm">
-                      <DollarSign className="w-4 h-4 text-success" />
-                      <span className="text-muted-foreground">{roadmap.salary}</span>
+                      <Wallet className="w-4 h-4 text-success" />
+                      <span className="text-muted-foreground font-medium">{localSalary}</span>
                     </div>
                     <div className="flex items-center gap-1 text-sm">
                       <TrendingUp className="w-4 h-4 text-primary" />

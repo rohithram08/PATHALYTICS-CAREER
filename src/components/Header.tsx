@@ -1,214 +1,337 @@
-import { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { User, Bookmark, Settings, LogOut, Menu, X } from 'lucide-react';
+// src/components/Header.tsx
+import { useState, useEffect } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import {
+  Menu,
+  ChevronDown,
+  LogOut,
+  User,
+  Settings,
+  BookmarkCheck,
+  LayoutDashboard,
+  Sparkles,
+  Briefcase,
+  GraduationCap,
+  Lightbulb,
+  Newspaper,
+  Trophy,
+  Bot,
+  Map,
+  Info,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { userKey } from '@/lib/userStorage';
+} from "@/components/ui/dropdown-menu";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
+import ThemeToggle from "@/components/ThemeToggle";
+import { useAuth } from "@/hooks/useAuth";
+import { toast } from "sonner";
+import logo from "@/assets/logo.png";
 
 const Header = () => {
-  const [isScrolled, setIsScrolled] = useState(false);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [profileImage, setProfileImage] = useState<string | null>(null);
+  const [scrolled, setScrolled] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const location = useLocation();
   const navigate = useNavigate();
+  const { user, isAuthenticated, isLoading, logout } = useAuth();
+
+  const userName = user?.name || "User";
+  const userInitials = userName
+    .split(" ")
+    .map((n: string) => n[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
 
   useEffect(() => {
-    const handleScroll = () => {
-      setIsScrolled(window.scrollY > 10);
-    };
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
+    const handleScroll = () => setScrolled(window.scrollY > 20);
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  // Check auth status from localStorage
   useEffect(() => {
-    const checkAuth = () => {
-      const storedUser = localStorage.getItem('pathlytics_user');
-      if (storedUser) {
-        setIsLoggedIn(true);
-        const parsed = JSON.parse(storedUser);
-
-        // Load profile image from user-specific key
-        const profileImageKey = userKey('profile_image');
-        const storedProfileImage = localStorage.getItem(profileImageKey);
-        setProfileImage(storedProfileImage || null);
-      } else {
-        setIsLoggedIn(false);
-        setProfileImage(null);
-      }
-    };
-    checkAuth();
-    window.addEventListener('storage', checkAuth);
-    window.addEventListener('pathlytics_user:updated', checkAuth);
-    return () => {
-      window.removeEventListener('storage', checkAuth);
-      window.removeEventListener('pathlytics_user:updated', checkAuth);
-    };
-  }, []);
+    setMobileOpen(false);
+  }, [location.pathname]);
 
   const handleLogout = () => {
-    localStorage.removeItem('pathlytics_user');
-    setIsLoggedIn(false);
-    navigate('/');
+    logout();
+    toast.success("Signed out successfully");
+    navigate("/login");
   };
 
-  const navLinks = [
-    { name: 'Career Recommendation', path: '/career-recommendation' },
-    { name: 'Roadmaps', path: '/roadmaps' },
-    { name: 'Chatbot', path: '/chatbot' },
+  const publicLinks = [
+    { label: "Blog", href: "/blog", icon: Newspaper },
+    { label: "Career Tips", href: "/career-tips", icon: Lightbulb },
+    { label: "Industry Insights", href: "/industry-insights", icon: GraduationCap },
+    { label: "Jobs", href: "/jobs", icon: Briefcase },
+    { label: "About", href: "/about", icon: Info },
   ];
+
+  const protectedLinks = [
+    { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+    { label: "Careers", href: "/career-recommendation", icon: Sparkles },
+    { label: "Roadmaps", href: "/roadmaps", icon: Map },
+    { label: "AI Chat", href: "/chatbot", icon: Bot },
+    { label: "Jobs", href: "/jobs", icon: Briefcase },
+    { label: "Saved", href: "/saved-careers", icon: BookmarkCheck },
+  ];
+
+  const navLinks = isAuthenticated ? protectedLinks : publicLinks;
+  const isActive = (href: string) => location.pathname === href;
+
+  const Logo = () => (
+    <>
+      <img src={logo} alt="Pathalytics Logo" className="w-8 h-8 object-contain" />
+      <span className="text-base font-bold tracking-tight">
+        Path<span className="gradient-text">alytics</span>
+      </span>
+    </>
+  );
+
+  if (isLoading) {
+    return (
+      <header className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-xl border-b">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            <Link to="/" className="flex items-center gap-2">
+              <Logo />
+            </Link>
+          </div>
+        </div>
+      </header>
+    );
+  }
 
   return (
     <header
       className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-        isScrolled
-          ? 'glass py-3 shadow-lg'
-          : 'bg-transparent py-5'
+        scrolled
+          ? "bg-background/90 backdrop-blur-xl border-b border-border shadow-sm"
+          : "bg-transparent"
       }`}
     >
-      <div className="container mx-auto px-4">
-        <div className="flex items-center justify-between">
-          {/* Logo */}
-          <Link to="/" className="flex items-center gap-3 group">
-            <div className="relative w-10 h-10 rounded-xl overflow-hidden shadow-glow transition-transform duration-300 group-hover:scale-105">
-  <img
-    src="/SmallSquareLogo.jpeg" 
-    alt="Pathlytics Logo"
-    className="w-full h-full object-cover"
-  />
-</div>
-            <span className="hidden sm:block font-display font-bold text-xl text-foreground">
-              PATHLYTICS<span className="text-primary">-CAREER</span>
-            </span>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between h-16">
+
+          {/* ── Logo ── */}
+          <Link
+            to={isAuthenticated ? "/dashboard" : "/"}
+            className="flex items-center gap-2 shrink-0"
+          >
+            <Logo />
           </Link>
 
-          {/* Desktop Navigation */}
-          <nav className="hidden lg:flex items-center gap-8">
+          {/* ── Desktop Nav ── */}
+          <nav className="hidden lg:flex items-center gap-0.5">
             {navLinks.map((link) => (
               <Link
-                key={link.path}
-                to={link.path}
-                className="text-muted-foreground hover:text-foreground transition-colors duration-200 animated-underline text-sm font-medium"
+                key={link.href}
+                to={link.href}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 ${
+                  isActive(link.href)
+                    ? "bg-primary/10 text-primary"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                }`}
               >
-                {link.name}
+                <link.icon className="w-4 h-4" />
+                {link.label}
               </Link>
             ))}
           </nav>
 
-          {/* Right Section */}
-          <div className="flex items-center gap-4">
-            {isLoggedIn ? (
+          {/* ── Right Actions ── */}
+          <div className="flex items-center gap-1.5">
+            <ThemeToggle />
+
+            {isAuthenticated && user ? (
+              /* ── User Dropdown ── */
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className="relative h-10 w-10 rounded-full">
-                    <Avatar className="h-10 w-10 ring-2 ring-primary/20 transition-all hover:ring-primary/40">
-                      {profileImage ? (
-                        <AvatarImage src={profileImage} alt="User profile" />
-                      ) : (
-                        <AvatarFallback className="bg-primary text-primary-foreground">
-                          <User className="h-4 w-4" />
-                        </AvatarFallback>
-                      )}
+                  <Button variant="ghost" className="flex items-center gap-2 pl-2 pr-3 h-9">
+                    <Avatar className="w-7 h-7">
+                      {user.avatar && <AvatarImage src={user.avatar} alt={userName} />}
+                      <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
+                        {userInitials}
+                      </AvatarFallback>
                     </Avatar>
+                    <span className="hidden sm:inline text-sm font-medium">
+                      {userName.split(" ")[0]}
+                    </span>
+                    <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent className="w-56" align="end" forceMount>
-                  <DropdownMenuItem asChild>
-                    <Link to="/profile" className="flex items-center gap-2">
-                      <User className="h-4 w-4" />
-                      <span>My Profile</span>
-                    </Link>
+
+                <DropdownMenuContent
+                  align="end"
+                  sideOffset={8}
+                  className="w-56 rounded-xl shadow-lg border border-border p-1"
+                >
+                  {/* User info */}
+                  <div className="px-3 py-2.5 mb-1 border-b border-border">
+                    <p className="text-sm font-semibold text-foreground truncate">{userName}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5 truncate">{user.email}</p>
+                  </div>
+
+                  {/* Nav items */}
+                  <DropdownMenuItem onClick={() => navigate("/profile")} className="flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer">
+                    <User className="w-4 h-4 text-muted-foreground" /> Profile
                   </DropdownMenuItem>
-                  <DropdownMenuItem asChild>
-                    <Link to="/dashboard" className="flex items-center gap-2">
-                      <User className="h-4 w-4" />
-                      <span>Dashboard</span>
-                    </Link>
+                  <DropdownMenuItem onClick={() => navigate("/dashboard")} className="flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer">
+                    <LayoutDashboard className="w-4 h-4 text-muted-foreground" /> Dashboard
                   </DropdownMenuItem>
-                  <DropdownMenuItem asChild>
-                    <Link to="/saved-careers" className="flex items-center gap-2">
-                      <Bookmark className="h-4 w-4" />
-                      <span>Saved Careers</span>
-                    </Link>
+                  <DropdownMenuItem onClick={() => navigate("/saved-careers")} className="flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer">
+                    <BookmarkCheck className="w-4 h-4 text-muted-foreground" /> Saved Careers
                   </DropdownMenuItem>
-                  <DropdownMenuItem asChild>
-                    <Link to="/settings" className="flex items-center gap-2">
-                      <Settings className="h-4 w-4" />
-                      <span>Settings</span>
-                    </Link>
+                  <DropdownMenuItem onClick={() => navigate("/settings")} className="flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer">
+                    <Settings className="w-4 h-4 text-muted-foreground" /> Settings
                   </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={handleLogout} className="text-destructive focus:text-destructive">
-                    <LogOut className="mr-2 h-4 w-4" />
-                    <span>Log out</span>
+                  <DropdownMenuItem onClick={() => navigate("/about")} className="flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer">
+                    <Info className="w-4 h-4 text-muted-foreground" /> About Us
+                  </DropdownMenuItem>
+
+                  <DropdownMenuSeparator className="my-1" />
+
+                  <DropdownMenuItem
+                    onClick={handleLogout}
+                    className="flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10"
+                  >
+                    <LogOut className="w-4 h-4" /> Log out
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : (
-              <div className="hidden sm:flex items-center gap-3">
-                <Button variant="ghost" asChild>
-                  <Link to="/login">Log in</Link>
+              /* ── Guest Buttons ── */
+              <div className="hidden sm:flex items-center gap-2">
+                <Button variant="ghost" size="sm" onClick={() => navigate("/login")}>
+                  Log in
                 </Button>
-                <Button className="bg-gradient-primary hover:opacity-90 transition-opacity" asChild>
-                  <Link to="/signup">Sign up</Link>
+                <Button size="sm" onClick={() => navigate("/signup")}>
+                  Get Started
                 </Button>
               </div>
             )}
 
-            {/* Mobile Menu Button */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="lg:hidden"
-              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            >
-              {isMobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-            </Button>
+            {/* ── Mobile Menu ── */}
+            <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+              <SheetTrigger asChild className="lg:hidden">
+                <Button variant="ghost" size="icon" className="h-9 w-9">
+                  <Menu className="w-5 h-5" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="right" className="w-72 p-0">
+                <SheetTitle className="sr-only">Navigation Menu</SheetTitle>
+                <div className="flex flex-col h-full">
+
+                  {/* Mobile header */}
+                  <div className="flex items-center gap-2 p-4 border-b border-border">
+                    <Link to="/" className="flex items-center gap-2">
+                      <Logo />
+                    </Link>
+                  </div>
+
+                  {/* Mobile nav links */}
+                  <nav className="flex-1 overflow-y-auto p-3 space-y-0.5">
+                    {navLinks.map((link) => (
+                      <Link
+                        key={link.href}
+                        to={link.href}
+                        className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${
+                          isActive(link.href)
+                            ? "bg-primary/10 text-primary"
+                            : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                        }`}
+                      >
+                        <link.icon className="w-4 h-4 shrink-0" />
+                        {link.label}
+                      </Link>
+                    ))}
+
+                    {/* Extra links for authenticated users */}
+                    {isAuthenticated && (
+                      <div className="pt-2 mt-1 border-t border-border space-y-0.5">
+                        {[
+                          { label: "Blog", href: "/blog", icon: Newspaper },
+                          { label: "Career Tips", href: "/career-tips", icon: Lightbulb },
+                          { label: "Industry Insights", href: "/industry-insights", icon: GraduationCap },
+                          { label: "About Us", href: "/about", icon: Info },
+                        ].map((link) => (
+                          <Link
+                            key={link.href}
+                            to={link.href}
+                            className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${
+                              isActive(link.href)
+                                ? "bg-primary/10 text-primary"
+                                : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                            }`}
+                          >
+                            <link.icon className="w-4 h-4 shrink-0" />
+                            {link.label}
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                  </nav>
+
+                  {/* Mobile footer actions */}
+                  <div className="p-3 border-t border-border space-y-1">
+                    {isAuthenticated ? (
+                      <>
+                        {/* Mini user info */}
+                        <div className="flex items-center gap-3 px-3 py-2.5 mb-1 bg-muted/40 rounded-xl">
+                          <Avatar className="w-8 h-8 shrink-0">
+                            {user?.avatar && <AvatarImage src={user.avatar} alt={userName} />}
+                            <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
+                              {userInitials}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-foreground truncate">{userName}</p>
+                            <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
+                          </div>
+                        </div>
+                        <Link
+                          to="/profile"
+                          className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                        >
+                          <User className="w-4 h-4" /> Profile
+                        </Link>
+                        <Link
+                          to="/settings"
+                          className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                        >
+                          <Settings className="w-4 h-4" /> Settings
+                        </Link>
+                        <Button
+                          variant="ghost"
+                          className="w-full justify-start text-destructive hover:text-destructive hover:bg-destructive/10 px-3"
+                          onClick={handleLogout}
+                        >
+                          <LogOut className="w-4 h-4 mr-3" /> Log out
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <Button variant="outline" className="w-full" onClick={() => navigate("/login")}>
+                          Log in
+                        </Button>
+                        <Button className="w-full" onClick={() => navigate("/signup")}>
+                          Get Started
+                        </Button>
+                      </>
+                    )}
+                  </div>
+
+                </div>
+              </SheetContent>
+            </Sheet>
           </div>
         </div>
-
-        {/* Mobile Menu */}
-        {isMobileMenuOpen && (
-          <div className="lg:hidden mt-4 pb-4 animate-fade-in bg-card/95 backdrop-blur-md rounded-xl border border-border shadow-lg p-2">
-            <nav className="flex flex-col gap-1">
-              {navLinks.map((link) => (
-                <Link
-                  key={link.path}
-                  to={link.path}
-                  className="px-4 py-3 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                  onClick={() => setIsMobileMenuOpen(false)}
-                >
-                  {link.name}
-                </Link>
-              ))}
-              {!isLoggedIn && (
-                <>
-                  <Link
-                    to="/login"
-                    className="px-4 py-3 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                    onClick={() => setIsMobileMenuOpen(false)}
-                  >
-                    Log in
-                  </Link>
-                  <Link
-                    to="/signup"
-                    className="px-4 py-3 rounded-lg bg-primary text-primary-foreground text-center font-medium"
-                    onClick={() => setIsMobileMenuOpen(false)}
-                  >
-                    Sign up
-                  </Link>
-                </>
-              )}
-            </nav>
-          </div>
-        )}
       </div>
     </header>
   );

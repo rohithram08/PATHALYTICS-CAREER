@@ -4,8 +4,8 @@ import { ArrowLeft, Lock, Eye, EyeOff, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { useToast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+import { toast } from "sonner";
+import { supabase } from '../../integrations/supabase/client';
 
 const ResetPassword = () => {
   const [password, setPassword] = useState('');
@@ -13,7 +13,6 @@ const ResetPassword = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isValid, setIsValid] = useState(false);
-  const { toast } = useToast();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -38,12 +37,12 @@ const ResetPassword = () => {
     e.preventDefault();
 
     if (password !== confirmPassword) {
-      toast({ title: 'Passwords do not match', variant: 'destructive' });
+      toast.error('Passwords do not match');
       return;
     }
 
     if (password.length < 8) {
-      toast({ title: 'Password must be at least 8 characters', variant: 'destructive' });
+      toast.error('Password must be at least 8 characters');
       return;
     }
 
@@ -51,9 +50,9 @@ const ResetPassword = () => {
     const { error } = await supabase.auth.updateUser({ password });
 
     if (error) {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast.error('Error', { description: error.message });
     } else {
-      toast({ title: 'Password updated!', description: 'You can now log in with your new password.' });
+      toast.success('Password updated!', { description: 'You can now log in with your new password.' });
       navigate('/login');
     }
     setIsLoading(false);

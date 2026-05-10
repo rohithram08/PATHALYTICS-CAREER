@@ -1,106 +1,159 @@
+import { useState, useMemo } from 'react';
 import Layout from '@/components/Layout';
 import { Badge } from '@/components/ui/badge';
-import { Calendar, Clock, User, ArrowRight } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Clock, User, ArrowRight, Search, Calendar } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { blogPosts } from '@/data/blogPosts';
 
-const blogPosts = [
-  {
-    id: 1,
-    title: 'How to Break Into Tech Without a CS Degree',
-    excerpt: 'A comprehensive guide for career changers looking to transition into the tech industry through self-learning, bootcamps, and strategic networking.',
-    author: 'Sarah Chen',
-    date: 'Mar 28, 2026',
-    readTime: '8 min read',
-    category: 'Career Change',
-    image: '💡',
-  },
-  {
-    id: 2,
-    title: 'The Rise of AI Engineering: What You Need to Know',
-    excerpt: 'AI engineering is one of the fastest-growing fields in tech. Learn what skills you need, what the job looks like day-to-day, and how to get started.',
-    author: 'James Rodriguez',
-    date: 'Mar 20, 2026',
-    readTime: '6 min read',
-    category: 'AI & ML',
-    image: '🤖',
-  },
-  {
-    id: 3,
-    title: 'Building a Portfolio That Gets You Hired',
-    excerpt: 'Your portfolio is your strongest asset. Here is how to showcase projects, write case studies, and present your work to potential employers.',
-    author: 'Priya Patel',
-    date: 'Mar 15, 2026',
-    readTime: '10 min read',
-    category: 'Job Search',
-    image: '🎯',
-  },
-  {
-    id: 4,
-    title: 'Remote Work in 2026: Best Practices for Developers',
-    excerpt: 'Remote work is here to stay. Discover productivity tips, communication strategies, and tools that successful remote developers use every day.',
-    author: 'Alex Kim',
-    date: 'Mar 10, 2026',
-    readTime: '7 min read',
-    category: 'Workplace',
-    image: '🏠',
-  },
-  {
-    id: 5,
-    title: 'Understanding Cloud Certifications: AWS vs Azure vs GCP',
-    excerpt: 'A detailed comparison of the top cloud certifications, their career impact, difficulty level, and which one is right for your career goals.',
-    author: 'Michael Torres',
-    date: 'Mar 5, 2026',
-    readTime: '12 min read',
-    category: 'Cloud',
-    image: '☁️',
-  },
-  {
-    id: 6,
-    title: 'The Complete Guide to Technical Interviews in 2026',
-    excerpt: 'From coding challenges to system design rounds, here is everything you need to know to ace your next technical interview at top tech companies.',
-    author: 'Emily Zhang',
-    date: 'Feb 28, 2026',
-    readTime: '15 min read',
-    category: 'Interviews',
-    image: '📝',
-  },
+const categories = [
+  'All',
+  'Career Change',
+  'AI & ML',
+  'Job Search',
+  'Workplace',
+  'Cloud',
+  'Interviews',
 ];
 
 const Blog = () => {
+  const [search, setSearch] = useState('');
+  const [activeCategory, setActiveCategory] = useState('All');
+
+  const filtered = useMemo(() => {
+    return blogPosts.filter((p) => {
+      const matchesCategory =
+        activeCategory === 'All' || p.category === activeCategory;
+      const q = search.toLowerCase();
+      const matchesSearch =
+        p.title.toLowerCase().includes(q) ||
+        p.excerpt.toLowerCase().includes(q) ||
+        p.tags.some((t) => t.toLowerCase().includes(q));
+      return matchesCategory && matchesSearch;
+    });
+  }, [search, activeCategory]);
+
+  const featured = blogPosts.length > 0 ? blogPosts[0] : null;
+  const rest = featured
+    ? filtered.filter((p) => p.id !== featured.id)
+    : filtered;
+
   return (
     <Layout>
-      <div className="container mx-auto px-4 py-16">
-        <div className="text-center max-w-3xl mx-auto mb-16">
+      <div className="container mx-auto px-4 py-12">
+        {/* Header */}
+        <div className="text-center max-w-3xl mx-auto mb-10">
           <Badge variant="secondary" className="mb-4">Blog</Badge>
           <h1 className="text-4xl md:text-5xl font-bold text-foreground mb-4">
             Latest Insights & Articles
           </h1>
           <p className="text-lg text-muted-foreground">
-            Stay ahead with expert advice, industry trends, and actionable career guidance from our team of professionals.
+            Original thinking on careers, AI, and engineering — from our team to yours.
           </p>
         </div>
 
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-          {blogPosts.map((post, index) => (
-            <article
-              key={post.id}
-              className="bg-card rounded-2xl border border-border overflow-hidden hover:border-primary/50 hover:shadow-lg transition-all duration-300 animate-fade-in-up flex flex-col"
-              style={{ animationDelay: `${index * 100}ms` }}
-            >
-              <div className="p-6 flex-1 flex flex-col">
-                <div className="text-5xl mb-4">{post.image}</div>
-                <Badge variant="outline" className="w-fit mb-3 text-xs">{post.category}</Badge>
-                <h2 className="text-xl font-bold text-foreground mb-3 line-clamp-2">{post.title}</h2>
-                <p className="text-sm text-muted-foreground mb-4 line-clamp-3 flex-1">{post.excerpt}</p>
-                <div className="flex items-center gap-4 text-xs text-muted-foreground pt-4 border-t border-border">
-                  <span className="flex items-center gap-1"><User className="w-3 h-3" />{post.author}</span>
-                  <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{post.date}</span>
-                  <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{post.readTime}</span>
+        {/* Search + Filters */}
+        <div className="max-w-4xl mx-auto mb-10 space-y-4">
+          <div className="relative">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              placeholder="Search articles, tags, topics..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-11 h-12"
+            />
+          </div>
+          <div className="flex flex-wrap gap-2 justify-center">
+            {categories.map((cat) => (
+              <Button
+                key={cat}
+                variant={activeCategory === cat ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setActiveCategory(cat)}
+                className="rounded-full"
+              >
+                {cat}
+              </Button>
+            ))}
+          </div>
+        </div>
+
+        {/* Featured Post */}
+        {featured && activeCategory === 'All' && search === '' && (
+          <Link
+            to={`/blog/${featured.id}`}
+            className="block mb-12 bg-card rounded-2xl border border-border overflow-hidden hover:border-primary/50 hover:shadow-xl transition-all group"
+          >
+            <div className="grid md:grid-cols-2">
+              <div
+                className="aspect-video md:aspect-auto bg-cover bg-center min-h-[260px]"
+                style={{ backgroundImage: `url(${featured.coverImage})` }}
+              />
+              <div className="p-8 md:p-10 flex flex-col justify-center">
+                <Badge className="w-fit mb-4">Featured</Badge>
+                <Badge variant="outline" className="w-fit mb-3">{featured.category}</Badge>
+                <h2 className="text-2xl md:text-3xl font-bold text-foreground mb-3 group-hover:text-primary transition-colors">
+                  {featured.title}
+                </h2>
+                <p className="text-muted-foreground mb-4">{featured.excerpt}</p>
+                <div className="flex items-center gap-4 text-sm text-muted-foreground flex-wrap">
+                  <span className="flex items-center gap-1"><User className="w-3.5 h-3.5" />{featured.author}</span>
+                  <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5" />{featured.date}</span>
+                  <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" />{featured.readTime}</span>
                 </div>
               </div>
-            </article>
-          ))}
-        </div>
+            </div>
+          </Link>
+        )}
+
+        {/* Results Count */}
+        <p className="text-sm text-muted-foreground mb-4">
+          Showing {rest.length} article{rest.length !== 1 ? 's' : ''}
+        </p>
+
+        {/* Grid */}
+        {rest.length === 0 ? (
+          <div className="text-center py-16">
+            <p className="text-muted-foreground">No articles found. Try a different search.</p>
+          </div>
+        ) : (
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {rest.map((post, index) => (
+              <Link
+                to={`/blog/${post.id}`}
+                key={post.id}
+                className="bg-card rounded-2xl border border-border overflow-hidden hover:border-primary/50 hover:shadow-lg hover:-translate-y-1 transition-all animate-fade-in-up flex flex-col group"
+                style={{ animationDelay: `${index * 80}ms` }}
+              >
+                {/* Cover Image */}
+                <div
+                  className="aspect-video bg-cover bg-center relative"
+                  style={{ backgroundImage: `url(${post.coverImage})` }}
+                >
+                  <div className="absolute top-3 left-3 text-3xl bg-background/90 backdrop-blur rounded-lg w-12 h-12 flex items-center justify-center shadow">
+                    {post.image}
+                  </div>
+                </div>
+
+                <div className="p-6 flex-1 flex flex-col">
+                  <Badge variant="outline" className="w-fit mb-3 text-xs">{post.category}</Badge>
+                  <h2 className="text-xl font-bold text-foreground mb-3 line-clamp-2 group-hover:text-primary transition-colors">
+                    {post.title}
+                  </h2>
+                  <p className="text-sm text-muted-foreground mb-4 line-clamp-3 flex-1">{post.excerpt}</p>
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground pt-4 border-t border-border flex-wrap">
+                    <span className="flex items-center gap-1"><User className="w-3 h-3" />{post.author}</span>
+                    <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{post.readTime}</span>
+                  </div>
+                  <span className="mt-4 inline-flex items-center text-sm font-medium text-primary opacity-0 group-hover:opacity-100 transition-opacity">
+                    Read article <ArrowRight className="w-3.5 h-3.5 ml-1" />
+                  </span>
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
       </div>
     </Layout>
   );

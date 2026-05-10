@@ -1,134 +1,221 @@
-import { Link } from 'react-router-dom';
-import { Mail, Phone, MapPin, Linkedin, Twitter, Github, Facebook } from 'lucide-react';
+// src/components/Footer.tsx
+import { useState } from "react";
+import { Link } from "react-router-dom";
+import {
+  Twitter,
+  Linkedin,
+  Mail,
+  ArrowRight,
+  Heart,
+  Facebook,
+  Loader2,
+  CheckCircle2,
+  MapPin,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
+import { toast } from "sonner";
+import logo from "@/assets/logo.png";
 
 const Footer = () => {
   const currentYear = new Date().getFullYear();
+  const [email, setEmail] = useState("");
+  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
 
-  const quickLinks = [
-    { name: 'Career Recommendation', path: '/career-recommendation' },
-    { name: 'Career Roadmaps', path: '/roadmaps' },
-    { name: 'Career Chatbot', path: '/chatbot' },
-    { name: 'Dashboard', path: '/dashboard' },
-  ];
+  const validateEmail = (value: string) =>
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
-  const resources = [
-    { name: 'Blog', path: '/blog' },
-    { name: 'Career Tips', path: '/career-tips' },
-    { name: 'Industry Insights', path: '/industry-insights' },
-    { name: 'Success Stories', path: '/success-stories' },
+  const handleSubscribe = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!validateEmail(email)) {
+      toast.error("Please enter a valid email address.");
+      return;
+    }
+
+    setStatus("loading");
+
+    try {
+      const res = await fetch("https://formspree.io/f/xqenevdy", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          email,
+          message: `New newsletter subscription: ${email}`,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Subscription failed");
+      }
+
+      setStatus("success");
+      toast.success("🎉 Subscribed! We'll be in touch soon.");
+      setEmail("");
+      setTimeout(() => setStatus("idle"), 3000);
+    } catch (err: any) {
+      setStatus("error");
+      console.error("Subscribe error:", err);
+      toast.error(err.message || "Something went wrong. Please try again.");
+      setTimeout(() => setStatus("idle"), 3000);
+    }
+  };
+
+  const footerSections = [
+    {
+      title: "Product",
+      links: [
+        { label: "Career Recommendation", href: "/career-recommendation" },
+        { label: "Roadmaps", href: "/roadmaps" },
+        { label: "AI Chatbot", href: "/chatbot" },
+        { label: "Job Board", href: "/jobs" },
+      ],
+    },
+    {
+      title: "Resources",
+      links: [
+        { label: "Blog", href: "/blog" },
+        { label: "Career Tips", href: "/career-tips" },
+        { label: "Industry Insights", href: "/industry-insights" },
+        { label: "Success Stories", href: "/success-stories" },
+      ],
+    },
+    {
+      title: "Company",
+      links: [
+        { label: "About", href: "/about" },
+        { label: "Privacy Policy", href: "/privacy-policy" },
+        { label: "Terms of Service", href: "/terms-of-service" },
+        { label: "Contact", href: "mailto:pathalytics@gmail.com" },
+      ],
+    },
   ];
 
   const socialLinks = [
-    { icon: Linkedin, href: 'https://www.linkedin.com/in/pathalytics-career-guidance', label: 'LinkedIn' },
-    { icon: Twitter, href: 'https://x.com/pathalytics', label: 'Twitter' },
-    { icon: Facebook, href: 'https://www.facebook.com/profile.php?id=61581936212152', label: 'Facebook' },
+    { icon: Twitter, href: "https://x.com/pathalytics", label: "Twitter" },
+    { icon: Linkedin, href: "https://www.linkedin.com/in/pathalytics/", label: "LinkedIn" },
+    { icon: Facebook, href: "https://www.facebook.com/profile.php?id=61581936212152", label: "Facebook" },
+    { icon: Mail, href: "mailto:pathalytics@gmail.com", label: "Email" },
   ];
 
   return (
-    <footer className="bg-foreground text-background">
-      <div className="container mx-auto px-4 py-16">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-12">
-          {/* Brand Section */}
-          <div className="space-y-6">
-            <Link to="/" className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-primary flex items-center justify-center">
-                <span className="text-primary-foreground font-bold text-lg">P</span>
-              </div>
-              <span className="font-display font-bold text-xl">
-                PATHLYTICS<span className="text-primary">-CAREER</span>
-              </span>
-            </Link>
-            <p className="text-background/70 text-sm leading-relaxed">
-              Empowering Computer Science students and job seekers with AI-powered career guidance, 
-              personalized roadmaps, and expert mentorship.
+    <footer className="bg-muted/30 border-t">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+
+        {/* ── Newsletter ── */}
+        <div className="py-12 md:py-16 flex flex-col md:flex-row items-center justify-between gap-8">
+          <div className="max-w-md text-center md:text-left">
+            <h3 className="text-2xl font-bold mb-2">Stay ahead in your career</h3>
+            <p className="text-muted-foreground">
+              Get weekly insights, tips, and career recommendations delivered to your inbox.
             </p>
-            <div className="flex gap-4">
+          </div>
+          <form
+            onSubmit={handleSubscribe}
+            className="flex w-full max-w-sm gap-2"
+            noValidate
+          >
+            <Input
+              type="email"
+              placeholder="Enter your email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              disabled={status === "loading"}
+              required
+              aria-label="Email address for newsletter"
+              className="bg-background"
+            />
+            <Button
+              type="submit"
+              className="shrink-0 gap-1 min-w-[120px]"
+              disabled={status === "loading" || status === "success"}
+            >
+              {status === "loading" && (
+                <><Loader2 className="w-4 h-4 animate-spin" /> Sending…</>
+              )}
+              {status === "success" && (
+                <><CheckCircle2 className="w-4 h-4" /> Subscribed</>
+              )}
+              {(status === "idle" || status === "error") && (
+                <>Subscribe <ArrowRight className="w-4 h-4" /></>
+              )}
+            </Button>
+          </form>
+        </div>
+
+        <Separator />
+
+        {/* ── Links Grid ── */}
+        <div className="py-12 grid grid-cols-2 md:grid-cols-4 gap-8">
+
+          {/* Brand column */}
+          <div className="col-span-2 md:col-span-1">
+            <Link to="/" className="flex items-center gap-2 mb-4">
+              <img src={logo} alt="Pathalytics Logo" className="w-8 h-8 object-contain" />
+              <span className="font-bold text-lg">Pathalytics</span>
+            </Link>
+            <p className="text-sm text-muted-foreground mb-3 leading-relaxed">
+              AI-powered career guidance platform helping you discover and pursue your ideal career path.
+            </p>
+
+            {/* Location */}
+            <div className="flex items-center gap-1.5 text-sm text-muted-foreground mb-4">
+              <MapPin className="w-3.5 h-3.5 text-primary shrink-0" />
+              <span>Chennai, Tamil Nadu, India</span>
+            </div>
+
+            {/* Social links */}
+            <div className="flex items-center gap-1.5">
               {socialLinks.map((social) => (
                 <a
                   key={social.label}
                   href={social.href}
-                  className="w-10 h-10 rounded-lg bg-background/10 flex items-center justify-center hover:bg-primary transition-colors group"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-9 h-9 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                   aria-label={social.label}
                 >
-                  <social.icon className="h-4 w-4 text-background/70 group-hover:text-primary-foreground transition-colors" />
+                  <social.icon className="w-4 h-4" />
                 </a>
               ))}
             </div>
           </div>
 
-          {/* Quick Links */}
-          <div>
-            <h3 className="font-semibold text-lg mb-6">Quick Links</h3>
-            <ul className="space-y-3">
-              {quickLinks.map((link) => (
-                <li key={link.name}>
-                  <Link
-                    to={link.path}
-                    className="text-background/70 hover:text-background transition-colors text-sm"
-                  >
-                    {link.name}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          {/* Resources */}
-          <div>
-            <h3 className="font-semibold text-lg mb-6">Resources</h3>
-            <ul className="space-y-3">
-              {resources.map((link) => (
-                <li key={link.name}>
-                  <Link
-                    to={link.path}
-                    className="text-background/70 hover:text-background transition-colors text-sm"
-                  >
-                    {link.name}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          {/* Contact Info */}
-          <div>
-            <h3 className="font-semibold text-lg mb-6">Contact Us</h3>
-            <ul className="space-y-4">
-              <li className="flex items-center gap-3 text-background/70 text-sm">
-                <Mail className="h-4 w-4 text-primary" />
-                <span>pathlytics@gmail.com</span>
-              </li>
-              <li className="flex items-center gap-3 text-background/70 text-sm">
-                <Phone className="h-4 w-4 text-primary" />
-                <span>+91 7358507075</span>
-              </li>
-              <li className="flex items-start gap-3 text-background/70 text-sm">
-                <MapPin className="h-4 w-4 text-primary mt-0.5" />
-                <span>peri institute of technology</span>
-              </li>
-            </ul>
-          </div>
-        </div>
-
-        {/* Bottom Bar */}
-        <div className="mt-12 pt-8 border-t border-background/10">
-          <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-            <p className="text-background/50 text-sm">
-              © {currentYear} PATHLYTICS-CAREER. All rights reserved.
-            </p>
-            <div className="flex gap-6">
-              <Link to="/legal?section=privacy" className="text-background/50 hover:text-background text-sm transition-colors">
-                Privacy Policy
-              </Link>
-              <Link to="/legal?section=terms" className="text-background/50 hover:text-background text-sm transition-colors">
-                Terms of Service
-              </Link>
-              <Link to="/legal?section=cookies" className="text-background/50 hover:text-background text-sm transition-colors">
-                Cookie Policy
-              </Link>
+          {/* Footer section columns */}
+          {footerSections.map((section) => (
+            <div key={section.title}>
+              <h4 className="font-semibold text-sm mb-4">{section.title}</h4>
+              <ul className="space-y-2.5">
+                {section.links.map((link) => (
+                  <li key={link.label}>
+                    <Link
+                      to={link.href}
+                      className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      {link.label}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
             </div>
-          </div>
+          ))}
         </div>
+
+        <Separator />
+
+        {/* ── Bottom bar ── */}
+        <div className="py-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-muted-foreground">
+          <p>© {currentYear} Pathalytics. All rights reserved.</p>
+          <p className="flex items-center gap-1">
+            Built with <Heart className="w-3.5 h-3.5 text-red-500 fill-red-500 mx-0.5" /> in Chennai, India
+          </p>
+        </div>
+
       </div>
     </footer>
   );
