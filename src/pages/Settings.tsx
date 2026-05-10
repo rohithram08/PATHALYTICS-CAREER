@@ -89,6 +89,7 @@ const Settings = () => {
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<NotificationPrefs>(DEFAULT_NOTIFS);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
   const [baseline, setBaseline] = useState({
@@ -111,7 +112,12 @@ const Settings = () => {
     setRole(user.role || 'Student');
     setProfileImage(storedImg);
     setNotifications(storedNotifs);
-    setBaseline({ name: user.name || '', role: user.role || 'Student', profileImage: storedImg, notifications: storedNotifs });
+    setBaseline({
+      name: user.name || '',
+      role: user.role || 'Student',
+      profileImage: storedImg,
+      notifications: storedNotifs,
+    });
   }, [user]);
 
   useEffect(() => {
@@ -125,7 +131,6 @@ const Settings = () => {
     JSON.stringify(notifications) !== JSON.stringify(baseline.notifications)
   ), [name, role, profileImage, notifications, baseline]);
 
-  // ── Warn on accidental tab close only when dirty ──
   useEffect(() => {
     if (!isDirty) return;
     const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
@@ -147,8 +152,6 @@ const Settings = () => {
       if (typeof reader.result === 'string') setProfileImage(reader.result);
     };
     reader.readAsDataURL(file);
-    // ⚠️ DATA ENGINEER NOTE: In production, upload to S3/Cloudinary here
-    // and store only the returned URL — not raw base64.
   }, [toast]);
 
   const handleAvatarInput = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -174,7 +177,6 @@ const Settings = () => {
         body: JSON.stringify({
           name: name.trim(),
           avatar: profileImage || null,
-          // ✅ FIX: notifications now synced to backend too
           notifications,
         }),
       });
@@ -188,7 +190,7 @@ const Settings = () => {
       window.dispatchEvent(new Event('pathlytics_user:updated'));
       setBaseline({ name: name.trim(), role, profileImage, notifications });
       toast({ title: 'Changes saved', description: 'Your profile has been updated.' });
-    } catch (err) {
+    } catch {
       toast({ title: 'Save failed', description: 'Could not update your profile. Please try again.', variant: 'destructive' });
     } finally {
       setIsSaving(false);
@@ -222,6 +224,34 @@ const Settings = () => {
     navigate('/');
   };
 
+  // ✅ FIX: handleDeleteAccount with useCallback, isDeleting guard, and full dep array
+  const handleDeleteAccount = useCallback(async () => {
+    if (isDeleting) return;
+    setIsDeleting(true);
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/me`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Delete failed');
+
+      localStorage.removeItem(userKey('profile_image'));
+      localStorage.removeItem(userKey(NOTIF_KEY));
+      window.dispatchEvent(new Event('pathlytics_user:updated'));
+      logout();
+      navigate('/');
+      toast({ title: 'Account deleted', description: 'Your account has been permanently deleted.' });
+    } catch {
+      toast({
+        title: 'Delete failed',
+        description: 'Could not delete your account. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [isDeleting, token, logout, navigate, toast]);
+
   const joinDate = user?.createdAt
     ? new Date(user.createdAt).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
     : null;
@@ -232,7 +262,6 @@ const Settings = () => {
 
   return (
     <Layout>
-      {/* ── Extra bottom padding only when dirty bar is visible ── */}
       <div className={cn("container mx-auto px-4 py-8 max-w-3xl", isDirty ? "pb-32" : "pb-8")}>
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-foreground mb-2">Settings</h1>
@@ -371,7 +400,7 @@ const Settings = () => {
             </div>
           </SettingsSection>
 
-          {/* ✅ LOGOUT — separated from Danger Zone */}
+          {/* LOGOUT */}
           <div className="bg-card rounded-2xl border border-border p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center">
@@ -405,7 +434,7 @@ const Settings = () => {
             </AlertDialog>
           </div>
 
-          {/* ✅ REAL DANGER ZONE — Delete Account */}
+          {/* DANGER ZONE */}
           <SettingsSection icon={AlertTriangle} iconClass="bg-destructive/10 text-destructive" title="Danger zone" description="Irreversible actions — proceed carefully.">
             <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
@@ -428,9 +457,19 @@ const Settings = () => {
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
-                      Yes, delete my account
+                    {/* ✅ FIX: Cancel disabled during deletion */}
+                    <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+                    {/* ✅ FIX: onClick wired + loading state */}
+                    <AlertDialogAction
+                      onClick={handleDeleteAccount}
+                      disabled={isDeleting}
+                      className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+                    >
+                      {isDeleting ? (
+                        <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Deleting...</>
+                      ) : (
+                        'Yes, delete my account'
+                      )}
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
@@ -440,7 +479,7 @@ const Settings = () => {
         </div>
       </div>
 
-      {/* ── Sticky save bar: only visible when dirty ── */}
+      {/* STICKY SAVE BAR */}
       {isDirty && (
         <div
           className="fixed bottom-0 inset-x-0 z-40 border-t border-border bg-background/95 backdrop-blur-md shadow-[0_-4px_20px_rgba(0,0,0,0.08)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.4)] animate-in slide-in-from-bottom duration-200"
