@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
+import { Analytics } from "@vercel/analytics/react";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import LoadingScreen from "@/components/LoadingScreen";
@@ -97,6 +98,7 @@ const App = () => (
           <AuthProvider>
             <TooltipProvider delayDuration={200}>
               <Toaster richColors position="top-right" closeButton />
+              <Analytics />
               <ScrollToTop />
               <Suspense fallback={<LoadingScreen />}>
                 <Routes>
