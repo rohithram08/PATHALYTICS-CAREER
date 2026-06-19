@@ -60,4 +60,10 @@ app.use((err, _req, res, _next) => {
   });
 });
 
-export default app; // ← KEY CHANGE: export, don't listen
+// ── Start Server ─────────────────────────────────
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`✅ Server running on port ${PORT}`);
+});
+
+export default app; // keep export too if needed elsewhere
