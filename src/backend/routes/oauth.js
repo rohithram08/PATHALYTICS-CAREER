@@ -48,9 +48,9 @@ const findOrLinkOrCreate = async (profile, provider) => {
 
     // 🔗 LINK this OAuth provider to the existing account
     await db.query(
-      `INSERT INTO user_providers (user_id, provider, provider_id, provider_email)
-       VALUES (?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE provider_id = VALUES(provider_id)`,
+      `INSERT INTO user_providers (user_id, provider, provider_user_id, provider_email)
+      VALUES (?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE provider_user_id = VALUES(provider_user_id)`,
       [existingUser.id, provider, providerId, email]
     );
 
@@ -81,10 +81,10 @@ const findOrLinkOrCreate = async (profile, provider) => {
 
   const newUserId = insertResult.insertId;
 
-  // Link the provider
+  // ✅ FIXED
   await db.query(
-    `INSERT INTO user_providers (user_id, provider, provider_id, provider_email)
-     VALUES (?, ?, ?, ?)`,
+    `INSERT INTO user_providers (user_id, provider, provider_user_id, provider_email)
+    VALUES (?, ?, ?, ?)`,
     [newUserId, provider, providerId, email]
   );
 
