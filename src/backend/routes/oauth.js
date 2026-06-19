@@ -28,7 +28,7 @@ const findOrLinkOrCreate = async (profile, provider) => {
   const [providerRows] = await db.query(
     `SELECT u.* FROM user_providers up
      JOIN users u ON u.id = up.user_id
-     WHERE up.provider = ? AND up.provider_id = ?`,
+     WHERE up.provider = ? AND up.provider_user_id= ?`,
     [provider, providerId]
   );
 
