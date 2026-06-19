@@ -5,11 +5,11 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const db = mysql.createPool({
-  uri: process.env.DATABASE_URL,
-  ssl: {
-    minVersion: "TLSv1.2",
-    rejectUnauthorized: true,
-  },
+  host: process.env.DB_HOST || "localhost",
+  port: parseInt(process.env.DB_PORT || "3306", 10),
+  user: process.env.DB_USER || "root",
+  password: process.env.DB_PASS || process.env.DB_PASSWORD || "",
+  database: process.env.DB_NAME || "pathlytics",
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
