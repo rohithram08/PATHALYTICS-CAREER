@@ -103,5 +103,8 @@ async def chat_stream_endpoint(
         media_type="text/event-stream",
     )
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 app.include_router(interview_router)

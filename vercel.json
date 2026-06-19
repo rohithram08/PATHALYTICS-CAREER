@@ -4,6 +4,7 @@
   "framework": "vite",
   "installCommand": "npm install --include=dev",
   "rewrites": [
+    { "source": "/api/:path*", "destination": "/api/index" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

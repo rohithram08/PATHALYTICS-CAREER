@@ -13,6 +13,10 @@ const db = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
+  ssl: {
+    minVersion: "TLSv1.2",
+    rejectUnauthorized: true,
+  },
 });
 
 const DB_NAME = process.env.DB_NAME || "pathlytics";

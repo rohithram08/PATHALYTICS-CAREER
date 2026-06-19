@@ -17,7 +17,6 @@ dotenv.config();
 
 const app = express();
 
-// ============ Security & Middleware ============
 app.use(
   helmet({
     crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
@@ -26,7 +25,10 @@ app.use(
 
 app.use(
   cors({
-    origin: ["https://pathalytics.vercel.app"],
+    origin: [
+      "https://pathalytics.vercel.app",
+      "http://localhost:5173", // local dev
+    ],
     credentials: true,
     methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
@@ -36,12 +38,10 @@ app.use(
 app.use(express.json({ limit: "10mb" }));
 app.use(cookieParser());
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
-
-// ============ Passport (JWT-based, no session) ============
 app.use(passport.initialize());
 
-// ============ Routes ============
-app.get("/health", (_req, res) =>
+// ── Routes ──────────────────────────────────────
+app.get("/api/health", (_req, res) =>
   res.json({ status: "ok", uptime: process.uptime() })
 );
 
@@ -51,7 +51,7 @@ app.use("/api/auth", oauthRoutes);
 app.use("/api/auth", passwordRoutes);
 app.use("/api/greenhouse", greenhouseApplyRoutes);
 
-// ============ Global Error Handler ============
+// ── Global Error Handler ─────────────────────────
 app.use((err, _req, res, _next) => {
   console.error(err);
   res.status(err.status || 500).json({
@@ -60,13 +60,4 @@ app.use((err, _req, res, _next) => {
   });
 });
 
-// ============ Start Server ============
-const PORT = process.env.PORT || 5000;
-const server = app.listen(PORT, () =>
-  console.log(`✅ Server running on http://localhost:${PORT}`)
-);
-
-// Graceful shutdown
-["SIGTERM", "SIGINT"].forEach((sig) =>
-  process.on(sig, () => server.close(() => process.exit(0)))
-);
+export default app; // ← KEY CHANGE: export, don't listen
