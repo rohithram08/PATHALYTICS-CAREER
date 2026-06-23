@@ -19,12 +19,15 @@ import { validateEnv } from "./utils/validateEnv.js";
 // ── Validate all required env vars on startup ────────────────
 validateEnv();
 
-import authRoutes       from "./routes/auth.js";
-import meRoutes         from "./routes/me.js";
-import passwordRoutes   from "./routes/password.js";
-import oauthRoutes      from "./routes/oauth.js";
-import jobsRoutes       from "./routes/jobs.js";
-import chatbotRoutes    from "./routes/chatbot.js";
+import authRoutes           from "./routes/auth.js";
+import meRoutes             from "./routes/me.js";
+import passwordRoutes       from "./routes/password.js";
+import oauthRoutes          from "./routes/oauth.js";
+import jobsRoutes           from "./routes/jobs.js";
+import chatbotRoutes        from "./routes/chatbot.js";
+import greenhouseApplyRoutes from "./routes/greenhouse-apply.js";
+import recruiterRoutes      from "./routes/recruiter.js";
+import applicationsRoutes   from "./routes/applications.js";
 
 const app = express();
 
@@ -59,20 +62,36 @@ app.use(
   })
 );
 
-// ── 2. CORS — whitelist only your frontend ──────────────────
-const ALLOWED_ORIGINS = [
-  process.env.FRONTEND_URL,                    // https://pathalytics.vercel.app
-  "http://localhost:5173",                      // local Vite dev
-].filter(Boolean);
+// ── 2. CORS ─────────────────────────────────────────────────
+// Allows:
+//   • Exact production URL (from FRONTEND_URL env var)
+//   • Any Vercel preview URL for this project — covers every branch
+//     deployment without any manual config (pathalytics-*.vercel.app)
+//   • EXTRA_ORIGINS env var — comma-separated, for custom domains / staging
+//   • localhost for local development
+const PROD_ORIGIN    = process.env.FRONTEND_URL || "https://pathalytics.vercel.app";
+const VERCEL_PATTERN = /^https:\/\/pathalytics(-[a-z0-9-]+)?\.vercel\.app$/;
+const EXTRA_ORIGINS  = (process.env.EXTRA_ORIGINS || "")
+  .split(",").map((o) => o.trim()).filter(Boolean);
 
 app.use(
   cors({
-    origin: (origin, callback) => {
-      // Allow server-to-server (no origin) and whitelisted origins only
-      if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+    origin: (incomingOrigin, callback) => {
+      // Allow server-to-server requests (no Origin header)
+      if (!incomingOrigin) return callback(null, true);
+
+      const allowed =
+        incomingOrigin === PROD_ORIGIN               ||
+        VERCEL_PATTERN.test(incomingOrigin)          ||
+        EXTRA_ORIGINS.includes(incomingOrigin)       ||
+        incomingOrigin === "http://localhost:5173"    ||
+        incomingOrigin === "http://localhost:3000";
+
+      if (allowed) {
         callback(null, true);
       } else {
-        callback(new Error(`CORS blocked: ${origin}`));
+        console.warn("[CORS] Blocked origin:", incomingOrigin);
+        callback(new Error(`CORS blocked: ${incomingOrigin}`));
       }
     },
     credentials: true,                         // allow httpOnly cookies
@@ -84,7 +103,9 @@ app.use(
 );
 
 // ── 3. Body limits — prevent DoS via huge payloads ──────────
-app.use(express.json({ limit: "50kb" }));      // was 10mb — way too large!
+// Note: file uploads (multer routes) bypass express.json entirely,
+// so 50kb here only governs JSON request bodies — correct.
+app.use(express.json({ limit: "50kb" }));
 app.use(express.urlencoded({ extended: false, limit: "50kb" }));
 app.use(cookieParser());
 
@@ -92,7 +113,6 @@ app.use(cookieParser());
 if (process.env.NODE_ENV !== "production") {
   app.use(morgan("dev"));
 } else {
-  // In production: combined format but skip health checks
   app.use(
     morgan("combined", {
       skip: (req) => req.url === "/api/health",
@@ -107,7 +127,7 @@ const globalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: "Too many requests. Please slow down." },
-  skip: (req) => req.url === "/api/health",  // don't rate-limit health checks
+  skip: (req) => req.url === "/api/health",
 });
 app.use(globalLimiter);
 
@@ -126,12 +146,15 @@ app.get("/api/health", (_req, res) =>
 );
 
 // ── 9. API Routes ────────────────────────────────────────────
-app.use("/api/auth",      authRoutes);
-app.use("/api/auth",      meRoutes);
-app.use("/api/auth",      oauthRoutes);
-app.use("/api/auth",      passwordRoutes);
-app.use("/api/jobs",      jobsRoutes);
-app.use("/api/chatbot",   chatbotRoutes);
+app.use("/api/auth",        authRoutes);
+app.use("/api/auth",        meRoutes);
+app.use("/api/auth",        oauthRoutes);
+app.use("/api/auth",        passwordRoutes);
+app.use("/api/jobs",        jobsRoutes);
+app.use("/api/chatbot",     chatbotRoutes);
+app.use("/api/greenhouse",  greenhouseApplyRoutes);
+app.use("/api/recruiter",   recruiterRoutes);
+app.use("/api/applications", applicationsRoutes);
 
 // ── 10. 404 handler for unknown routes ──────────────────────
 app.use((_req, res) => {
@@ -165,7 +188,7 @@ const PORT = parseInt(process.env.PORT || "5000", 10);
 app.listen(PORT, () => {
   console.log(`✅ Pathalytics API running on port ${PORT}`);
   console.log(`   Environment : ${process.env.NODE_ENV}`);
-  console.log(`   Allowed CORS: ${ALLOWED_ORIGINS.join(", ")}`);
+  console.log(`   Allowed CORS: ${PROD_ORIGIN} + Vercel previews`);
 });
 
 export default app;
