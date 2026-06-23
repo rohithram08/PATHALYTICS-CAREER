@@ -15,7 +15,9 @@
 // Also adds: server-side rate limiting, input validation,
 //            response caching (60s), and error sanitization.
 // ─────────────────────────────────────────────────────────────
-
+// Add at the top of jobs.js with the other imports
+import db from "../db.js";
+import { requireAuth, requireRole } from "../middleware/auth.js";
 import express from "express";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
@@ -148,6 +150,37 @@ router.get("/", jobsLimiter, async (req, res) => {
     }
     console.error("[jobs] Unexpected error:", err);
     return res.status(500).json({ message: "An error occurred while searching for jobs." });
+  }
+});
+
+import { requireAuth, requireRole } from "../middleware/auth.js";
+
+// ── GET /api/jobs/mine — recruiter's own job listings ─────────
+router.get("/mine", requireAuth, requireRole("recruiter"), async (req, res) => {
+  try {
+    // Get the recruiter_profiles.id for this user first
+    const [profile] = await db.query(
+      "SELECT id FROM recruiter_profiles WHERE user_id = ?",
+      [req.user.id]
+    );
+    if (!profile.length) {
+      return res.json({ results: [], count: 0 });
+    }
+
+    const [jobs] = await db.query(
+      `SELECT id, title, location, job_type, status,
+              salary_min, salary_max, salary_currency,
+              created_at, updated_at
+       FROM jobs
+       WHERE recruiter_id = ?
+       ORDER BY created_at DESC`,
+      [profile[0].id]
+    );
+
+    return res.json({ results: jobs, count: jobs.length });
+  } catch (err) {
+    console.error("[jobs:mine]", err);
+    return res.status(500).json({ message: "Server error" });
   }
 });
 

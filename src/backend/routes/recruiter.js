@@ -42,9 +42,9 @@ const upload = multer({
 router.get("/profile", async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT id, company_name, company_size, industry, designation, company_domain,
+      `SELECT id, company_name, company_size, industry, designation,
               company_tier, verification_status, created_at
-       FROM recruiter_profiles WHERE user_id = ?`,
+      FROM recruiter_profiles WHERE user_id = ?`,
       [req.user.id]
     );
     if (rows.length === 0) {

@@ -261,6 +261,27 @@ const initSchema = async () => {
       console.log("✅ Created email_notifications table.");
     }
 
+    // ── company_verification_documents ──────────────────────────
+    if (!(await tableExists("company_verification_documents"))) {
+      await db.query(`
+        CREATE TABLE company_verification_documents (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          recruiter_profile_id INT NOT NULL,
+          document_type ENUM('incorporation_certificate','gst_certificate','company_pan','other') NOT NULL,
+          storage_key VARCHAR(255) NOT NULL,
+          original_filename VARCHAR(255) NOT NULL,
+          uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          review_status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+          reviewed_by INT NULL,
+          reviewed_at DATETIME NULL,
+          rejection_reason VARCHAR(255) NULL,
+          FOREIGN KEY (recruiter_profile_id) REFERENCES recruiter_profiles(id) ON DELETE CASCADE,
+          INDEX idx_review_status (review_status)
+        )
+      `);
+      console.log("✅ Created company_verification_documents table.");
+    }
+
     // ── Legacy OAuth migration ───────────────────────────────────
     const hasOauthProvider = await columnExists("users", "oauth_provider");
     const hasOauthId = await columnExists("users", "oauth_id");
