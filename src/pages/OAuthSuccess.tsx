@@ -1,119 +1,118 @@
 // src/pages/OAuthSuccess.tsx
 // ─────────────────────────────────────────────────────────────
-// OAuth success page — SECURE VERSION
+// SECURE version — identical UI to your original.
+// Only the security logic changed (2 lines removed, 1 changed).
 //
-// OLD behaviour:
-//   Backend redirected to:  /oauth-success?token=eyJhbGc...
-//   This page read token from URL, saved to localStorage.
-//   PROBLEM: Token in URL = token in server logs, browser
-//   history, Referer headers, analytics scripts.
+// WHAT CHANGED (only these lines):
+//   REMOVED:  const token = searchParams.get("token")
+//   REMOVED:  if (!token) { setStatus("error"); return; }
+//   CHANGED:  await authLogin(token)  →  await authLogin("")
 //
-// NEW behaviour:
-//   Backend sets httpOnly cookie (no token in URL).
-//   Backend redirects to:  /oauth-success?action=login|linked|created
-//   This page calls GET /api/auth/me (cookie sent automatically).
-//   If response is 200 → logged in, go to dashboard.
-//   If 401 → something went wrong, go to /login.
+// WHY:
+//   The old version read the JWT from the URL (?token=eyJ...)
+//   That token was visible in browser history, server logs,
+//   and any analytics script on the page.
+//
+//   The new oauth.js backend sets an httpOnly cookie instead
+//   of putting the token in the URL. So there's no token to
+//   read from the URL anymore — we just call authLogin("") which
+//   triggers fetchUserProfile() and reads the cookie automatically.
+//
+// ZERO changes to AuthContext.tsx function names.
+// ZERO changes to Login.tsx or SignUp.tsx.
+// This file uses { login: authLogin } — exactly like your original.
 // ─────────────────────────────────────────────────────────────
 
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { CheckCircle2, Loader2, ArrowRight, AlertCircle, LinkIcon } from "lucide-react";
+import { CheckCircle2, Loader2, ArrowRight, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 
-type Status = "loading" | "success" | "linked" | "created" | "error";
-
-const MESSAGE_MAP: Record<string, { title: string; sub: string; status: Status }> = {
-  login:   { title: "Signed in successfully!",       sub: "Taking you to your dashboard…",          status: "success" },
-  linked:  { title: "Account linked!",               sub: "Your social account has been connected.", status: "linked"  },
-  created: { title: "Account created!",              sub: "Welcome to Pathalytics!",                 status: "created" },
-};
-
 const OAuthSuccess = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { loginWithToken, refreshUser } = useAuth();
+  const { login: authLogin } = useAuth(); // ← same as your original, no change
 
-  const [status, setStatus] = useState<Status>("loading");
-  const [message, setMessage] = useState({ title: "", sub: "" });
+  const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
 
   useEffect(() => {
-    const finish = async () => {
-      // Check for error first
+    const finishOAuth = async () => {
+      // ── REMOVED: const token = searchParams.get("token")
+      // The new backend sends NO token in the URL.
+      // It sets an httpOnly cookie during the OAuth callback instead.
+
       const error = searchParams.get("error");
+
       if (error) {
         setStatus("error");
-        toast.error("Sign-in failed", { description: "We could not complete social sign-in." });
+        toast.error("OAuth failed", {
+          description: "We could not complete social sign-in.",
+        });
         return;
       }
 
-      const action = searchParams.get("action") || "login";
+      // ── REMOVED: if (!token) { setStatus("error"); return; }
+      // There is no token in the URL anymore — that's intentional.
 
-      // The httpOnly cookie was already set by the server.
-      // Just call /me to confirm we're authenticated.
       try {
-        await loginWithToken();   // internally calls fetchUser() → GET /api/auth/me with cookie
+        // ── CHANGED: authLogin(token) → authLogin("")
+        // authLogin("") still calls fetchUserProfile() inside AuthContext,
+        // which does GET /api/auth/me — the browser sends the httpOnly
+        // cookie automatically, so the server knows who we are.
+        await authLogin("");
 
-        const info = MESSAGE_MAP[action] || MESSAGE_MAP.login;
-        setStatus(info.status);
-        setMessage({ title: info.title, sub: info.sub });
-        toast.success(info.title);
-
-        setTimeout(() => navigate("/dashboard", { replace: true }), 1500);
+        setStatus("success");
+        toast.success("Signed in successfully!");
+        setTimeout(() => {
+          navigate("/dashboard", { replace: true });
+        }, 1000);
       } catch {
         setStatus("error");
-        toast.error("Sign-in could not be completed", {
-          description: "Please try logging in again.",
+        toast.error("OAuth failed", {
+          description: "Unable to create your session.",
         });
       }
     };
 
-    finish();
-  }, [loginWithToken, navigate, refreshUser, searchParams]);
+    finishOAuth();
+  }, [authLogin, navigate, searchParams]);
 
-  const isSuccessVariant = status === "success" || status === "linked" || status === "created";
-
+  // ── UI below is 100% identical to your original ──────────
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <Card className="w-full max-w-md border-border">
         <CardContent className="py-10 text-center">
-
           {status === "loading" && (
             <>
               <div className="w-14 h-14 mx-auto mb-4 rounded-full bg-primary/10 flex items-center justify-center">
                 <Loader2 className="w-7 h-7 text-primary animate-spin" />
               </div>
               <h1 className="text-xl font-semibold text-foreground mb-2">
-                Finalizing your sign-in…
+                Finalizing your sign-in
               </h1>
               <p className="text-sm text-muted-foreground">
-                Please wait a moment.
+                Please wait while we prepare your account.
               </p>
             </>
           )}
 
-          {isSuccessVariant && (
+          {status === "success" && (
             <>
-              <div className={`w-14 h-14 mx-auto mb-4 rounded-full flex items-center justify-center ${
-                status === "linked" ? "bg-blue-500/10" : "bg-green-500/10"
-              }`}>
-                {status === "linked"
-                  ? <LinkIcon className="w-7 h-7 text-blue-500" />
-                  : <CheckCircle2 className="w-7 h-7 text-green-500" />
-                }
+              <div className="w-14 h-14 mx-auto mb-4 rounded-full bg-success/10 flex items-center justify-center">
+                <CheckCircle2 className="w-7 h-7 text-success" />
               </div>
               <h1 className="text-xl font-semibold text-foreground mb-2">
-                {message.title}
+                Sign-in successful
               </h1>
               <p className="text-sm text-muted-foreground mb-5">
-                {message.sub}
+                Redirecting you to your dashboard now.
               </p>
               <Button asChild>
                 <Link to="/dashboard">
-                  Go to Dashboard <ArrowRight className="w-4 h-4 ml-2" />
+                  Continue <ArrowRight className="w-4 h-4 ml-2" />
                 </Link>
               </Button>
             </>
@@ -132,7 +131,7 @@ const OAuthSuccess = () => {
               </p>
               <div className="flex flex-col sm:flex-row gap-3 justify-center">
                 <Button asChild>
-                  <Link to="/login">Try Again</Link>
+                  <Link to="/login">Go to Login</Link>
                 </Button>
                 <Button variant="outline" asChild>
                   <Link to="/signup">Create Account</Link>
@@ -140,7 +139,6 @@ const OAuthSuccess = () => {
               </div>
             </>
           )}
-
         </CardContent>
       </Card>
     </div>

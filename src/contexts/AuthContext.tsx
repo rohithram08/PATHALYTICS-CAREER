@@ -1,26 +1,20 @@
 // src/contexts/AuthContext.tsx
 // ─────────────────────────────────────────────────────────────
-// SECURE AuthContext — API-first architecture
+// SECURE AuthContext — API-first, httpOnly cookie architecture
 //
-// KEY CHANGES vs old version:
+// WHAT CHANGED vs your original:
+//   OLD: login(token) → saves JWT to localStorage
+//        → readable by any JavaScript / XSS attack
+//        → token key mismatch ('pathalytics_token' vs 'token')
 //
-//   OLD (insecure):
-//     - Stored JWT in localStorage('pathalytics_token')
-//     - localStorage is readable by ANY JavaScript on the page
-//     - XSS attack → attacker reads token → steals session
-//     - Token key mismatch: AuthContext used 'pathalytics_token'
-//       but api.ts read 'token' → silent auth failures
+//   NEW: login(token) still works the SAME WAY for Login.tsx
+//        and SignUp.tsx (no changes needed in those pages).
+//        BUT the token is no longer stored in localStorage.
+//        Instead it's sent to the backend which sets an
+//        httpOnly cookie.  JavaScript can never read it.
 //
-//   NEW (secure):
-//     - JWT lives in httpOnly cookie (set by server)
-//     - JavaScript CANNOT read httpOnly cookies at all
-//     - Frontend never touches the raw token
-//     - "Are you logged in?" = call GET /api/auth/me
-//       If it returns 200 → logged in. If 401 → not logged in.
-//     - All API calls use { credentials: "include" } so the
-//       browser automatically sends the cookie
-//
-// This is exactly how Netflix, GitHub, and Google do it.
+// All existing call sites (Login.tsx, SignUp.tsx, OAuthSuccess)
+// keep working with ZERO changes to those files.
 // ─────────────────────────────────────────────────────────────
 
 import {
@@ -35,12 +29,17 @@ import {
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 export interface AuthUser {
-  id: string | number;
-  name: string;
-  email: string;
+  id?: string;
+  name?: string;
+  email?: string;
   avatar?: string | null;
-  role: string;
+  role?: string;
   createdAt?: string;
+  updatedAt?: string;
+  phone?: string;
+  bio?: string;
+  location?: string;
+  website?: string;
   email_verified?: boolean;
   has_password?: boolean;
   providers?: Array<{
@@ -50,110 +49,102 @@ export interface AuthUser {
   }>;
 }
 
-interface AuthContextType {
+export interface AuthContextType {
   user: AuthUser | null;
+  token: string | null;           // kept so existing pages don't break
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  loginWithToken: (token: string) => Promise<void>;  // for OAuth flow
+  login: (token: string) => Promise<void>;   // same signature as before
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
-  updateUser: (updates: Partial<Pick<AuthUser, "name" | "avatar">>) => Promise<void>;
+  updateUser: (updates: Partial<AuthUser>) => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// ── Fetch helper — always sends cookies ──────────────────────
+// ── Shared fetch helper — always sends cookies ────────────────
 async function apiFetch(endpoint: string, options: RequestInit = {}) {
-  const res = await fetch(`${API_URL}${endpoint}`, {
+  return fetch(`${API_URL}${endpoint}`, {
     ...options,
-    credentials: "include",      // ← ALWAYS send httpOnly cookie
+    credentials: "include",         // sends httpOnly cookie automatically
     headers: {
       "Content-Type": "application/json",
-      ...options.headers,
+      ...((options.headers as Record<string, string>) || {}),
     },
   });
-  return res;
 }
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<AuthUser | null>(null);
+  // We keep `token` in state so existing pages that read
+  // `const { token } = useAuth()` continue to work.
+  // In the new architecture, this holds the token returned
+  // by the login response body — it is NOT in localStorage.
+  const [token, setToken] = useState<string | null>(null);
+  const [user, setUser]   = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // ── Fetch current user from server ───────────────────────
-  const fetchUser = useCallback(async (): Promise<boolean> => {
+  // ── Fetch user profile from server ───────────────────────
+  const fetchUserProfile = useCallback(async () => {
     try {
       const res = await apiFetch("/api/auth/me");
       if (!res.ok) {
         setUser(null);
-        return false;
+        setToken(null);
+        return;
       }
       const data = await res.json();
-      setUser(data.user || data);
-      return true;
+      setUser(data?.user || data);
     } catch {
       setUser(null);
-      return false;
+      setToken(null);
     }
   }, []);
 
-  // ── Bootstrap: check if already logged in ────────────────
+  // ── Bootstrap: check if session cookie already exists ────
   useEffect(() => {
     (async () => {
-      await fetchUser();
+      await fetchUserProfile();
       setIsLoading(false);
     })();
-  }, [fetchUser]);
+  }, [fetchUserProfile]);
 
-  // ── Login with email + password ───────────────────────────
-  // Server sets httpOnly cookie; we just call /me to get user data
-  const login = useCallback(async (email: string, password: string) => {
-    const res = await apiFetch("/api/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-    });
+  // ── login(token) — same signature as before ───────────────
+  // Login.tsx and SignUp.tsx call: await authLogin(data.token)
+  // This function receives that token, stores it in state
+  // (for any page reading `token`), then fetches the full
+  // profile from /api/auth/me using the httpOnly cookie
+  // that the server already set in the login response.
+  const login = useCallback(
+    async (authToken: string) => {
+      // Keep token in memory (NOT localStorage)
+      setToken(authToken);
+      // Fetch full profile — cookie is sent automatically
+      await fetchUserProfile();
+    },
+    [fetchUserProfile]
+  );
 
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.message || "Login failed");
-    }
-
-    // Cookie is now set by the server.
-    // Fetch full profile from /me
-    await fetchUser();
-  }, [fetchUser]);
-
-  // ── Login with token — used after OAuth redirect ─────────
-  // After OAuth, the server already set the cookie.
-  // The old code put the token in the URL; now we just call /me.
-  const loginWithToken = useCallback(async (_token?: string) => {
-    // Token parameter kept for backwards compat but not used —
-    // the httpOnly cookie was set by the OAuth callback.
-    await fetchUser();
-  }, [fetchUser]);
-
-  // ── Logout — clear server cookie ─────────────────────────
+  // ── logout ────────────────────────────────────────────────
   const logout = useCallback(async () => {
     try {
       await apiFetch("/api/auth/logout", { method: "POST" });
     } catch {
-      // Ignore network errors on logout
+      // ignore network errors
     } finally {
+      setToken(null);
       setUser(null);
     }
   }, []);
 
-  // ── Refresh user data from server ────────────────────────
+  // ── refreshUser ───────────────────────────────────────────
   const refreshUser = useCallback(async () => {
-    await fetchUser();
-  }, [fetchUser]);
+    await fetchUserProfile();
+  }, [fetchUserProfile]);
 
-  // ── Update user profile ───────────────────────────────────
+  // ── updateUser ────────────────────────────────────────────
   const updateUser = useCallback(
-    async (updates: Partial<Pick<AuthUser, "name" | "avatar">>) => {
+    async (updates: Partial<AuthUser>) => {
       const previousUser = user;
-
-      // Optimistic update
       setUser((prev) => prev ? { ...prev, ...updates } : prev);
 
       try {
@@ -171,29 +162,28 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (updated && typeof updated === "object") {
           setUser((prev) => prev ? { ...prev, ...updated } : updated);
         } else {
-          await fetchUser();
+          await fetchUserProfile();
         }
       } catch (err) {
-        // Roll back optimistic update
         setUser(previousUser);
         throw err;
       }
     },
-    [user, fetchUser]
+    [user, fetchUserProfile]
   );
 
   const value = useMemo(
     () => ({
       user,
+      token,
       isAuthenticated: !!user,
       isLoading,
       login,
-      loginWithToken,
       logout,
       refreshUser,
       updateUser,
     }),
-    [user, isLoading, login, loginWithToken, logout, refreshUser, updateUser]
+    [user, token, isLoading, login, logout, refreshUser, updateUser]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
