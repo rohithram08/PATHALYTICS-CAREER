@@ -1,198 +1,197 @@
 // src/backend/routes/oauth.js
+// ─────────────────────────────────────────────────────────────
+// OAuth 2.0 flows: Google + GitHub
+//
+// KEY SECURITY FIX vs. old version:
+//   OLD: redirect to /oauth-success?token=JWT  ← JWT in URL!
+//        → logged in server access logs
+//        → in browser history  
+//        → sent in Referer headers to 3rd parties
+//        → visible to analytics scripts
+//
+//   NEW: set JWT in httpOnly cookie, redirect to /oauth-success
+//        with NO token in the URL. The frontend reads the user
+//        from /api/auth/me (using the cookie automatically).
+//
+// Also added: CSRF state parameter to prevent OAuth CSRF attacks.
+// ─────────────────────────────────────────────────────────────
+
 import express from "express";
 import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import { Strategy as GitHubStrategy } from "passport-github2";
 import jwt from "jsonwebtoken";
-import dotenv from "dotenv";
+import crypto from "crypto";
 import db from "../db.js";
-
-dotenv.config();
 
 const router = express.Router();
 
-// ============ SMART USER UPSERT WITH LINKING ============
-const findOrLinkOrCreate = async (profile, provider) => {
+// ── In-memory CSRF state store ────────────────────────────────
+// In production with multiple server instances, use Redis instead
+const oauthStates = new Map();   // state → { createdAt, provider }
+
+function generateState() {
+  return crypto.randomBytes(32).toString("hex");
+}
+
+function validateState(state) {
+  if (!state || !oauthStates.has(state)) return false;
+  const { createdAt } = oauthStates.get(state);
+  oauthStates.delete(state);    // single-use
+
+  // State expires after 10 minutes
+  return Date.now() - createdAt < 10 * 60 * 1000;
+}
+
+// Clean up old states every 15 minutes
+setInterval(() => {
+  const cutoff = Date.now() - 15 * 60 * 1000;
+  for (const [key, val] of oauthStates.entries()) {
+    if (val.createdAt < cutoff) oauthStates.delete(key);
+  }
+}, 15 * 60 * 1000);
+
+// ── JWT cookie helper ─────────────────────────────────────────
+function setAuthCookie(res, user) {
+  const token = jwt.sign(
+    { id: user.id, email: user.email, role: user.role || "user" },
+    process.env.JWT_SECRET,
+    { expiresIn: "7d", algorithm: "HS256" }
+  );
+
+  res.cookie("token", token, {
+    httpOnly: true,                                    // NOT accessible by JS
+    secure: process.env.NODE_ENV === "production",    // HTTPS only in prod
+    sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
+    maxAge: 7 * 24 * 60 * 60 * 1000,                 // 7 days
+    path: "/",
+  });
+
+  return token;  // returned so we can also send it in JSON for mobile clients
+}
+
+// ── User upsert logic ─────────────────────────────────────────
+async function findOrCreateUser(profile, provider) {
   const email = profile.emails?.[0]?.value?.toLowerCase().trim();
-  const name = profile.displayName || profile.username || "User";
-  const providerId = profile.id;
+  const name  = profile.displayName || profile.username || "User";
+  const providerUserId = profile.id;
   const avatarUrl = profile.photos?.[0]?.value || null;
 
   if (!email) {
     throw new Error(
-      `No email provided by ${provider}. Please make your email public or use email signup.`
+      `${provider} did not provide an email address. ` +
+      `Please make your email public on ${provider} or use email/password signup.`
     );
   }
 
-  // STEP 1: Check if this exact (provider, providerId) is already linked
+  // 1. Provider already linked?
   const [providerRows] = await db.query(
     `SELECT u.* FROM user_providers up
      JOIN users u ON u.id = up.user_id
-     WHERE up.provider = ? AND up.provider_user_id= ?`,
-    [provider, providerId]
+     WHERE up.provider = ? AND up.provider_user_id = ?`,
+    [provider, providerUserId]
   );
-
   if (providerRows.length > 0) {
-    // Already linked → just log them in
-    return { user: providerRows[0], linked: false, created: false };
+    return { user: providerRows[0], action: "login" };
   }
 
-  // STEP 2: Check if a user with this email already exists
+  // 2. Email already registered? Link provider.
   const [emailRows] = await db.query(
     "SELECT * FROM users WHERE LOWER(email) = ?",
     [email]
   );
-
   if (emailRows.length > 0) {
-    const existingUser = emailRows[0];
-
-    // 🔗 LINK this OAuth provider to the existing account
+    const existing = emailRows[0];
     await db.query(
       `INSERT INTO user_providers (user_id, provider, provider_user_id, provider_email)
-      VALUES (?, ?, ?, ?)
-      ON DUPLICATE KEY UPDATE provider_user_id = VALUES(provider_user_id)`,
-      [existingUser.id, provider, providerId, email]
+       VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE provider_user_id = VALUES(provider_user_id)`,
+      [existing.id, provider, providerUserId, email]
     );
-
-    // Update avatar if not set
-    if (!existingUser.avatar_url && avatarUrl) {
-      await db.query("UPDATE users SET avatar_url = ? WHERE id = ?", [
-        avatarUrl,
-        existingUser.id,
-      ]);
-      existingUser.avatar_url = avatarUrl;
+    if (!existing.avatar_url && avatarUrl) {
+      await db.query("UPDATE users SET avatar_url = ? WHERE id = ?", [avatarUrl, existing.id]);
     }
-
-    // Mark email as verified (OAuth providers verify emails)
-    await db.query(
-      "UPDATE users SET email_verified = 1 WHERE id = ?",
-      [existingUser.id]
-    );
-
-    return { user: existingUser, linked: true, created: false };
+    await db.query("UPDATE users SET email_verified = 1 WHERE id = ?", [existing.id]);
+    return { user: existing, action: "linked" };
   }
 
-  // STEP 3: No existing user → create new account
-  const [insertResult] = await db.query(
-    `INSERT INTO users (name, email, password, avatar_url, email_verified)
-     VALUES (?, ?, '', ?, 1)`,
+  // 3. New user — create account
+  const [result] = await db.query(
+    "INSERT INTO users (name, email, password, avatar_url, email_verified, role) VALUES (?, ?, '', ?, 1, 'user')",
     [name, email, avatarUrl]
   );
-
-  const newUserId = insertResult.insertId;
-
-  // ✅ FIXED
   await db.query(
-    `INSERT INTO user_providers (user_id, provider, provider_user_id, provider_email)
-    VALUES (?, ?, ?, ?)`,
-    [newUserId, provider, providerId, email]
+    "INSERT INTO user_providers (user_id, provider, provider_user_id, provider_email) VALUES (?, ?, ?, ?)",
+    [result.insertId, provider, providerUserId, email]
   );
+  const [newUser] = await db.query("SELECT * FROM users WHERE id = ?", [result.insertId]);
+  return { user: newUser[0], action: "created" };
+}
 
-  const [newUser] = await db.query("SELECT * FROM users WHERE id = ?", [newUserId]);
-  return { user: newUser[0], linked: false, created: true };
-};
-
-// ============ Generate JWT redirect URL ============
-const generateAuthRedirect = (user, info = {}) => {
-  const token = jwt.sign(
-    { id: user.id, email: user.email },
-    process.env.JWT_SECRET,
-    { expiresIn: "7d" }
-  );
-
-  const params = new URLSearchParams({
-    token,
-    name: user.name || "User",
-    email: user.email,
-  });
-
-  if (info.linked) params.set("linked", "1");
-  if (info.created) params.set("created", "1");
-
-  return `${process.env.FRONTEND_URL}/oauth-success?${params.toString()}`;
-};
-
-// ============ Google Strategy ============
-const GOOGLE_ENABLED =
-  !!process.env.GOOGLE_CLIENT_ID && !!process.env.GOOGLE_CLIENT_SECRET;
+// ── Register Passport strategies ─────────────────────────────
+const GOOGLE_ENABLED = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+const GITHUB_ENABLED = !!(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET);
 
 if (GOOGLE_ENABLED) {
-  passport.use(
-    new GoogleStrategy(
-      {
-        clientID: process.env.GOOGLE_CLIENT_ID,
-        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-        callbackURL:
-          process.env.GOOGLE_CALLBACK_URL ||
-          "http://localhost:5000/api/auth/google/callback",
-      },
-      async (_at, _rt, profile, done) => {
-        try {
-          const result = await findOrLinkOrCreate(profile, "google");
-          return done(null, { ...result.user, _info: result });
-        } catch (err) {
-          return done(err, null);
-        }
+  passport.use(new GoogleStrategy(
+    {
+      clientID:     process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      callbackURL:  process.env.GOOGLE_CALLBACK_URL,
+    },
+    async (_at, _rt, profile, done) => {
+      try {
+        const result = await findOrCreateUser(profile, "google");
+        done(null, result);
+      } catch (err) {
+        done(err);
       }
-    )
-  );
-  console.log("✅ Google OAuth enabled");
-} else {
-  console.warn("⚠️  Google OAuth disabled — credentials missing");
+    }
+  ));
 }
-
-// ============ GitHub Strategy ============
-const GITHUB_ENABLED =
-  !!process.env.GITHUB_CLIENT_ID && !!process.env.GITHUB_CLIENT_SECRET;
 
 if (GITHUB_ENABLED) {
-  passport.use(
-    new GitHubStrategy(
-      {
-        clientID: process.env.GITHUB_CLIENT_ID,
-        clientSecret: process.env.GITHUB_CLIENT_SECRET,
-        callbackURL:
-          process.env.GITHUB_CALLBACK_URL ||
-          "http://localhost:5000/api/auth/github/callback",
-        scope: ["user:email"],
-      },
-      async (_at, _rt, profile, done) => {
-        try {
-          const result = await findOrLinkOrCreate(profile, "github");
-          return done(null, { ...result.user, _info: result });
-        } catch (err) {
-          return done(err, null);
-        }
+  passport.use(new GitHubStrategy(
+    {
+      clientID:     process.env.GITHUB_CLIENT_ID,
+      clientSecret: process.env.GITHUB_CLIENT_SECRET,
+      callbackURL:  process.env.GITHUB_CALLBACK_URL,
+      scope:        ["user:email"],
+    },
+    async (_at, _rt, profile, done) => {
+      try {
+        const result = await findOrCreateUser(profile, "github");
+        done(null, result);
+      } catch (err) {
+        done(err);
       }
-    )
-  );
-  console.log("✅ GitHub OAuth enabled");
-} else {
-  console.warn("⚠️  GitHub OAuth disabled — credentials missing");
+    }
+  ));
 }
 
-// ============ ROUTES ============
-
-// Google
+// ── Route: Initiate Google OAuth ──────────────────────────────
 router.get("/google", (req, res, next) => {
   if (!GOOGLE_ENABLED) {
-    return res.redirect(
-      `${process.env.FRONTEND_URL}/login?error=google_not_configured`
-    );
+    return res.redirect(`${process.env.FRONTEND_URL}/login?error=google_not_configured`);
   }
+  // Generate CSRF state token
+  const state = generateState();
+  oauthStates.set(state, { createdAt: Date.now(), provider: "google" });
+
   passport.authenticate("google", {
     scope: ["profile", "email"],
     session: false,
+    state,                 // ← CSRF protection
   })(req, res, next);
 });
 
+// ── Route: Google callback ────────────────────────────────────
 router.get(
   "/google/callback",
   (req, res, next) => {
-    if (!GOOGLE_ENABLED) {
-      return res.redirect(
-        `${process.env.FRONTEND_URL}/login?error=google_not_configured`
-      );
+    // Validate CSRF state
+    if (!validateState(req.query.state)) {
+      return res.redirect(`${process.env.FRONTEND_URL}/login?error=invalid_state`);
     }
     passport.authenticate("google", {
       session: false,
@@ -200,36 +199,34 @@ router.get(
     })(req, res, next);
   },
   (req, res) => {
-    try {
-      const { _info, ...user } = req.user;
-      res.redirect(generateAuthRedirect(user, _info));
-    } catch (err) {
-      console.error("Google callback error:", err);
-      res.redirect(`${process.env.FRONTEND_URL}/login?error=token_failed`);
-    }
+    const { user, action } = req.user;
+    setAuthCookie(res, user);
+    // NO TOKEN IN URL — the cookie carries the auth
+    res.redirect(`${process.env.FRONTEND_URL}/oauth-success?action=${action}`);
   }
 );
 
-// GitHub
+// ── Route: Initiate GitHub OAuth ──────────────────────────────
 router.get("/github", (req, res, next) => {
   if (!GITHUB_ENABLED) {
-    return res.redirect(
-      `${process.env.FRONTEND_URL}/login?error=github_not_configured`
-    );
+    return res.redirect(`${process.env.FRONTEND_URL}/login?error=github_not_configured`);
   }
+  const state = generateState();
+  oauthStates.set(state, { createdAt: Date.now(), provider: "github" });
+
   passport.authenticate("github", {
     scope: ["user:email"],
     session: false,
+    state,
   })(req, res, next);
 });
 
+// ── Route: GitHub callback ────────────────────────────────────
 router.get(
   "/github/callback",
   (req, res, next) => {
-    if (!GITHUB_ENABLED) {
-      return res.redirect(
-        `${process.env.FRONTEND_URL}/login?error=github_not_configured`
-      );
+    if (!validateState(req.query.state)) {
+      return res.redirect(`${process.env.FRONTEND_URL}/login?error=invalid_state`);
     }
     passport.authenticate("github", {
       session: false,
@@ -237,13 +234,9 @@ router.get(
     })(req, res, next);
   },
   (req, res) => {
-    try {
-      const { _info, ...user } = req.user;
-      res.redirect(generateAuthRedirect(user, _info));
-    } catch (err) {
-      console.error("GitHub callback error:", err);
-      res.redirect(`${process.env.FRONTEND_URL}/login?error=token_failed`);
-    }
+    const { user, action } = req.user;
+    setAuthCookie(res, user);
+    res.redirect(`${process.env.FRONTEND_URL}/oauth-success?action=${action}`);
   }
 );
 

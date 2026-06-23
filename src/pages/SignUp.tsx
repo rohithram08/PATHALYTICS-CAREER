@@ -14,6 +14,10 @@ import {
   Github,
   Sparkles,
   CheckCircle2,
+  Briefcase,
+  Building2,
+  GraduationCap,
+  ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +25,13 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import favicon from "@/public/favicon.svg";
@@ -35,11 +46,17 @@ const SignUp = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState<"google" | "github" | null>(null);
+  const [role, setRole] = useState<"user" | "recruiter">("user");
   const [formData, setFormData] = useState({
     name: "",
     email: "",
     password: "",
     agree: false,
+    // Recruiter-only
+    companyName: "",
+    companySize: "",
+    industry: "",
+    designation: "",
   });
 
   const [errors, setErrors] = useState<{
@@ -47,6 +64,10 @@ const SignUp = () => {
     email?: string;
     password?: string;
     agree?: string;
+    companyName?: string;
+    companySize?: string;
+    industry?: string;
+    designation?: string;
   }>({});
 
   useEffect(() => {
@@ -93,6 +114,13 @@ const SignUp = () => {
       newErrors.agree = "You must accept the terms to continue";
     }
 
+    if (role === "recruiter") {
+      if (!formData.companyName.trim()) newErrors.companyName = "Company name is required";
+      if (!formData.companySize) newErrors.companySize = "Company size is required";
+      if (!formData.industry.trim()) newErrors.industry = "Industry is required";
+      if (!formData.designation.trim()) newErrors.designation = "Your designation is required";
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -119,6 +147,13 @@ const SignUp = () => {
           name: formData.name.trim(),
           email: formData.email.trim(),
           password: formData.password,
+          role,
+          ...(role === "recruiter" && {
+            companyName: formData.companyName.trim(),
+            companySize: formData.companySize,
+            industry: formData.industry.trim(),
+            designation: formData.designation.trim(),
+          }),
         }),
       });
 
@@ -131,7 +166,14 @@ const SignUp = () => {
       if (data?.token) {
         await authLogin(data.token);
         toast.success("Account created successfully!");
-        navigate("/dashboard");
+        if (role === "recruiter" && data.requiresDocuments) {
+          toast.info("One more step — upload your company documents to activate your account.");
+          navigate("/recruiter/profile");
+        } else if (role === "recruiter") {
+          navigate("/recruiter/dashboard");
+        } else {
+          navigate("/dashboard");
+        }
         return;
       }
 
@@ -229,6 +271,37 @@ const SignUp = () => {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-5">
+            {/* Role selector */}
+            <div className="space-y-2">
+              <Label>I am signing up as</Label>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setRole("user")}
+                  className={`flex items-center gap-2 justify-center h-11 rounded-md border text-sm font-medium transition-colors ${
+                    role === "user"
+                      ? "border-primary bg-primary/5 text-primary"
+                      : "border-input hover:bg-accent"
+                  }`}
+                >
+                  <GraduationCap className="w-4 h-4" />
+                  Student / Job seeker
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRole("recruiter")}
+                  className={`flex items-center gap-2 justify-center h-11 rounded-md border text-sm font-medium transition-colors ${
+                    role === "recruiter"
+                      ? "border-primary bg-primary/5 text-primary"
+                      : "border-input hover:bg-accent"
+                  }`}
+                >
+                  <Briefcase className="w-4 h-4" />
+                  Recruiter / Employer
+                </button>
+              </div>
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="name">Full name</Label>
               <div className="relative">
@@ -272,6 +345,73 @@ const SignUp = () => {
                 <p className="text-xs text-destructive">{errors.email}</p>
               )}
             </div>
+
+            {/* Recruiter-only fields */}
+            {role === "recruiter" && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="companyName">Company name</Label>
+                  <div className="relative">
+                    <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <input
+                      id="companyName"
+                      type="text"
+                      placeholder="Acme Corp"
+                      value={formData.companyName}
+                      onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
+                      className={`flex h-11 w-full rounded-md border border-input bg-background pl-10 pr-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${errors.companyName ? "border-destructive" : ""}`}
+                    />
+                  </div>
+                  {errors.companyName && <p className="text-xs text-destructive">{errors.companyName}</p>}
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Company size</Label>
+                    <Select onValueChange={(v) => setFormData({ ...formData, companySize: v })}>
+                      <SelectTrigger className={`h-11 ${errors.companySize ? "border-destructive" : ""}`}>
+                        <SelectValue placeholder="Select size" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {["1-10","11-50","51-200","201-500","501-1000","1000+"].map((s) => (
+                          <SelectItem key={s} value={s}>{s} employees</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {errors.companySize && <p className="text-xs text-destructive">{errors.companySize}</p>}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="industry">Industry</Label>
+                    <input
+                      id="industry"
+                      type="text"
+                      placeholder="e.g. FinTech"
+                      value={formData.industry}
+                      onChange={(e) => setFormData({ ...formData, industry: e.target.value })}
+                      className={`flex h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${errors.industry ? "border-destructive" : ""}`}
+                    />
+                    {errors.industry && <p className="text-xs text-destructive">{errors.industry}</p>}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="designation">Your designation</Label>
+                  <div className="relative">
+                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <input
+                      id="designation"
+                      type="text"
+                      placeholder="e.g. HR Manager, Talent Acquisition Lead"
+                      value={formData.designation}
+                      onChange={(e) => setFormData({ ...formData, designation: e.target.value })}
+                      className={`flex h-11 w-full rounded-md border border-input bg-background pl-10 pr-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${errors.designation ? "border-destructive" : ""}`}
+                    />
+                  </div>
+                  {errors.designation && <p className="text-xs text-destructive">{errors.designation}</p>}
+                </div>
+              </>
+            )}
 
             <div className="space-y-2">
               <Label htmlFor="password">Create password</Label>

@@ -19,11 +19,30 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useToast }  from '@/hooks/use-toast';
 import JobListings   from '@/components/JobListings';
+import { useAuth }   from '@/hooks/useAuth';
 import {
   getApplications, updateApplicationNotes, updateApplicationStatus,
   removeApplication, getStatusCounts, STATUS_CONFIG,
   ApplicationStatus, JobApplication,
 } from '@/lib/applications';
+
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+
+// Shape of what /api/applications/mine returns — replaces `any`
+interface BackendApplication {
+  id: number;
+  job_id: number | null;
+  external_job_title: string | null;
+  external_company: string | null;
+  external_url: string | null;
+  source: 'internal' | 'adzuna' | 'greenhouse';
+  status: ApplicationStatus;
+  applied_at: string;
+  updated_at: string;
+  job_title: string | null;
+  company_name: string | null;
+  current_stage_name: string | null;
+}
 
 const POPULAR_CAREERS = [
   'Software Engineer', 'Data Scientist', 'Product Manager',
@@ -76,7 +95,9 @@ const Jobs = () => {
   const handleChipClick = (v: string) =>
     setQuery((prev) => prev.toLowerCase() === v.toLowerCase() ? '' : v);
 
+  const { token, isAuthenticated } = useAuth();
   const [applications, setApplications] = useState<JobApplication[]>(getApplications);
+  const [loadingApps,  setLoadingApps]  = useState(false);
   const [appsSearch,   setAppsSearch]   = useState('');
   const [statusFilter, setStatusFilter] = useState<ApplicationStatus | 'all'>('all');
   const [sortKey,      setSortKey]      = useState<SortKey>('newest');
@@ -86,7 +107,42 @@ const Jobs = () => {
   const [deleteTarget, setDeleteTarget] = useState<JobApplication | null>(null);
 
   const debouncedAppsSearch = useDebounce(appsSearch, 300);
-  const refreshApps = useCallback(() => setApplications(getApplications()), []);
+  const refreshApps = useCallback(async () => {
+    if (isAuthenticated && token) {
+      setLoadingApps(true);
+      try {
+        const res = await fetch(`${API_URL}/api/applications/mine`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const backendApps = await res.json();
+          // Map backend rows to the JobApplication shape the UI expects
+          const mapped: JobApplication[] = (backendApps as BackendApplication[]).map((a) => ({
+            id: a.job_id ? `int-${a.job_id}` : `ext-${a.id}`,
+            jobId: a.job_id ? `int-${a.job_id}` : `ext-${a.id}`,
+            jobTitle: a.job_title || a.external_job_title || "Job",
+            company: a.company_name || a.external_company || "",
+            location: "",
+            jobUrl: a.external_url || "",
+            status: a.status as ApplicationStatus,
+            appliedAt: a.applied_at,
+            notes: "",
+            source: a.source,
+            currentStageName: a.current_stage_name || null,
+          }));
+          // Merge: backend rows are authoritative; only add localStorage
+          // entries that don't have a backend equivalent (Adzuna/GH jobs
+          // tracked before this backend was deployed).
+          const backendIds = new Set(mapped.map((m) => m.jobId));
+          const localOnly = getApplications().filter((a) => !backendIds.has(a.jobId));
+          setApplications([...mapped, ...localOnly]);
+          return;
+        }
+      } catch { /* fall through to localStorage */ }
+      finally { setLoadingApps(false); }
+    }
+    setApplications(getApplications());
+  }, [isAuthenticated, token]);
 
   useEffect(() => { if (activeTab === 'applications') refreshApps(); }, [activeTab, refreshApps]);
   useEffect(() => { setPage(1); }, [debouncedAppsSearch, sortKey, statusFilter]);

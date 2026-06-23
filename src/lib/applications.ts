@@ -40,6 +40,9 @@ export interface JobApplication {
   notes?: string;
   customCoverLetter?: string;
   answers?: Record<string, string>;
+  // Backend-sourced fields — undefined for localStorage-only entries
+  source?: 'internal' | 'adzuna' | 'greenhouse';
+  currentStageName?: string | null;
 }
 
 const PROFILE_KEY = 'user_apply_profile';
