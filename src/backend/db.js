@@ -123,10 +123,12 @@ const initSchema = async () => {
           id INT AUTO_INCREMENT PRIMARY KEY,
           user_id INT NOT NULL UNIQUE,
           company_name VARCHAR(255) NOT NULL,
+          company_size ENUM('1-10','11-50','51-200','201-500','501-1000','1000+') NULL,
+          industry VARCHAR(100) NULL,
           company_website VARCHAR(500) NULL,
           company_logo_url LONGTEXT NULL,
           company_tier ENUM('top','mid','startup') NOT NULL DEFAULT 'startup',
-          work_email VARCHAR(255) NOT NULL,
+          work_email VARCHAR(255) NULL,
           designation VARCHAR(255) NULL,
           phone VARCHAR(30) NULL,
           linkedin_url VARCHAR(500) NULL,
@@ -139,6 +141,14 @@ const initSchema = async () => {
         )
       `);
       console.log("✅ Created recruiter_profiles table.");
+    } else {
+      // Migrate existing recruiter_profiles — add missing columns
+      await addColumnIfMissing(
+        "recruiter_profiles", "company_size",
+        "ENUM('1-10','11-50','51-200','201-500','501-1000','1000+') NULL"
+      );
+      await addColumnIfMissing("recruiter_profiles", "industry", "VARCHAR(100) NULL");
+      await addColumnIfMissing("recruiter_profiles", "work_email", "VARCHAR(255) NULL");
     }
 
     // ── jobs ─────────────────────────────────────────────────────

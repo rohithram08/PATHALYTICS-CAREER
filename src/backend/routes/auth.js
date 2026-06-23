@@ -15,6 +15,9 @@
 //   3. Account lockout after 5 failed attempts (15 min)
 //
 //   4. Logout clears the cookie properly
+//
+//   5. Signup now reads role from request body and creates
+//      recruiter_profiles row immediately for recruiter signups
 // ─────────────────────────────────────────────────────────────
 
 import express from "express";
@@ -108,6 +111,9 @@ router.post("/signup", authLimiter, async (req, res) => {
 
     const { name, email, password } = parsed.data;
 
+    // Read role from body — only allow safe values, default to 'user'
+    const role = req.body.role === "recruiter" ? "recruiter" : "user";
+
     const [existing] = await db.query(
       "SELECT id FROM users WHERE email = ?",
       [email]
@@ -121,12 +127,39 @@ router.post("/signup", authLimiter, async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    await db.query(
-      "INSERT INTO users (name, email, password, role, email_verified) VALUES (?, ?, ?, 'user', 0)",
-      [name, email, hashedPassword]
+    const [result] = await db.query(
+      "INSERT INTO users (name, email, password, role, email_verified) VALUES (?, ?, ?, ?, 0)",
+      [name, email, hashedPassword, role]
     );
+    const userId = result.insertId;
 
-    return res.status(201).json({ message: "Account created successfully. Please log in." });
+    // If recruiter, create the recruiter_profiles row immediately
+    // so RecruiterGuard and /api/recruiter/profile work right away.
+    if (role === "recruiter") {
+      const companyName = (req.body.companyName || "").trim();
+      const companySize = req.body.companySize  || "1-10";
+      const industry    = (req.body.industry    || "").trim();
+      const designation = (req.body.designation || "").trim();
+
+      await db.query(
+        `INSERT INTO recruiter_profiles
+           (user_id, company_name, company_size, industry, designation, verification_status)
+         VALUES (?, ?, ?, ?, ?, 'pending')`,
+        [userId, companyName, companySize, industry, designation]
+      );
+    }
+
+    // Sign a token so the frontend can log in immediately after signup
+    const token = signToken({ id: userId, email, role });
+    setAuthCookie(res, token);
+
+    return res.status(201).json({
+      message: "Account created successfully.",
+      token,
+      user: { id: userId, name, email, role },
+      // Frontend uses this flag to show the "upload documents" nudge
+      requiresDocuments: role === "recruiter",
+    });
   } catch (err) {
     console.error("[signup]", err);
     return res.status(500).json({ message: "Server error" });

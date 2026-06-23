@@ -124,7 +124,12 @@ const Login = () => {
 
       await authLogin(data.token);
       toast.success("Welcome back!");
-      navigate("/dashboard");
+      if (data.user?.role === "recruiter") {
+        navigate("/recruiter/dashboard");
+      } else {
+        navigate("/dashboard");
+      }
+
     } catch (err: any) {
       toast.error("Login failed", {
         description: err?.message || "Unable to sign in right now.",
