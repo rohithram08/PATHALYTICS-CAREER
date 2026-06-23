@@ -181,9 +181,9 @@ const SignUp = () => {
         description: "Please sign in to continue.",
       });
       navigate("/login");
-    } catch (err: any) {
+    } catch (err: unknown) {
       toast.error("Sign-up failed", {
-        description: err?.message || "Unable to create account right now.",
+        description: err instanceof Error ? err.message : "Unable to create account right now.",
       });
     } finally {
       setLoading(false);

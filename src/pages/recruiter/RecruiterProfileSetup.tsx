@@ -90,8 +90,8 @@ const RecruiterProfileSetup = () => {
       });
       if (!res.ok) throw new Error((await res.json()).message);
       toast.success("Profile updated");
-    } catch (err: any) {
-      toast.error(err?.message || "Update failed");
+    } catch (err: unknown) {
+      toast.error((err instanceof Error ? err.message : "An error occurred") || "Update failed");
     } finally {
       setSaving(false);
     }
@@ -111,8 +111,8 @@ const RecruiterProfileSetup = () => {
       if (!res.ok) throw new Error((await res.json()).message);
       toast.success("Document uploaded — our team will review it shortly");
       await load();
-    } catch (err: any) {
-      toast.error(err?.message || "Upload failed");
+    } catch (err: unknown) {
+      toast.error((err instanceof Error ? err.message : "An error occurred") || "Upload failed");
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = "";

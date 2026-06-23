@@ -82,8 +82,8 @@ const PostJob = () => {
       if (!res.ok) throw new Error(data.message);
       setJobId(data.id);
       setStep(2);
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to save job");
+    } catch (err: unknown) {
+      toast.error((err instanceof Error ? err.message : "An error occurred") || "Failed to save job");
     } finally {
       setSaving(false);
     }
@@ -122,8 +122,8 @@ const PostJob = () => {
 
       toast.success("Job published! Candidates can now apply.");
       navigate("/recruiter/jobs");
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to publish");
+    } catch (err: unknown) {
+      toast.error((err instanceof Error ? err.message : "An error occurred") || "Failed to publish");
     } finally {
       setPublishing(false);
     }

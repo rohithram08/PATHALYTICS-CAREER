@@ -1,5 +1,5 @@
 // src/pages/recruiter/ManageJobs.tsx
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Plus, Users, ExternalLink, Edit2, CheckCircle2, XCircle, Clock } from "lucide-react";
@@ -44,7 +44,7 @@ const ManageJobs = () => {
   const [loading, setLoading] = useState(true);
   const [actioning, setActioning] = useState<number | null>(null);
 
-  const loadJobs = async () => {
+  const loadJobs = useCallback(async () => {
     try {
       const res = await fetch(`${API_URL}/api/jobs/mine`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -56,9 +56,9 @@ const ManageJobs = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [token]);
 
-  useEffect(() => { loadJobs(); }, [token]);
+  useEffect(() => { loadJobs(); }, [loadJobs]);
 
   const publish = async (id: number) => {
     setActioning(id);
@@ -71,8 +71,8 @@ const ManageJobs = () => {
       if (!res.ok) throw new Error(data.message);
       toast.success("Job published");
       await loadJobs();
-    } catch (err: any) {
-      toast.error(err?.message || "Could not publish");
+    } catch (err: unknown) {
+      toast.error((err instanceof Error ? err.message : "An error occurred") || "Could not publish");
     } finally {
       setActioning(null);
     }

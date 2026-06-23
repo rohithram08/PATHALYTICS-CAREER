@@ -91,8 +91,8 @@ const ApplicationsReview = () => {
         )
       );
       toast.success("Updated — candidate has been notified by email");
-    } catch (err: any) {
-      toast.error(err?.message || "Update failed");
+    } catch (err: unknown) {
+      toast.error((err instanceof Error ? err.message : "An error occurred") || "Update failed");
     } finally {
       setUpdating(null);
     }

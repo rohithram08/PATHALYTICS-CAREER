@@ -1,22 +1,4 @@
 // src/contexts/AuthContext.tsx
-// ─────────────────────────────────────────────────────────────
-// SECURE AuthContext — API-first, httpOnly cookie architecture
-//
-// WHAT CHANGED vs your original:
-//   OLD: login(token) → saves JWT to localStorage
-//        → readable by any JavaScript / XSS attack
-//        → token key mismatch ('pathalytics_token' vs 'token')
-//
-//   NEW: login(token) still works the SAME WAY for Login.tsx
-//        and SignUp.tsx (no changes needed in those pages).
-//        BUT the token is no longer stored in localStorage.
-//        Instead it's sent to the backend which sets an
-//        httpOnly cookie.  JavaScript can never read it.
-//
-// All existing call sites (Login.tsx, SignUp.tsx, OAuthSuccess)
-// keep working with ZERO changes to those files.
-// ─────────────────────────────────────────────────────────────
-
 import {
   createContext,
   useCallback,
@@ -27,6 +9,7 @@ import {
 } from "react";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+const TOKEN_KEY = "pathalytics_token";
 
 export interface AuthUser {
   id?: string;
@@ -40,6 +23,7 @@ export interface AuthUser {
   bio?: string;
   location?: string;
   website?: string;
+  // ✅ Added — required for Settings and ChangePassword pages
   email_verified?: boolean;
   has_password?: boolean;
   providers?: Array<{
@@ -47,143 +31,250 @@ export interface AuthUser {
     email?: string | null;
     linkedAt: string;
   }>;
+  // Recruiter-only fields — undefined for ordinary users
+  companyTier?: "top" | "mid" | "low";
+  verificationStatus?: "pending" | "verified" | "rejected";
 }
 
 export interface AuthContextType {
   user: AuthUser | null;
-  token: string | null;           // kept so existing pages don't break
+  token: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (token: string) => Promise<void>;   // same signature as before
-  logout: () => Promise<void>;
+  isRecruiter: boolean;
+  isVerifiedRecruiter: boolean;
+  login: (token: string, extraUserData?: Partial<AuthUser>) => Promise<void>;
+  logout: () => void;
   refreshUser: () => Promise<void>;
   updateUser: (updates: Partial<AuthUser>) => Promise<void>;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// ── Shared fetch helper — always sends cookies ────────────────
-async function apiFetch(endpoint: string, options: RequestInit = {}) {
-  return fetch(`${API_URL}${endpoint}`, {
-    ...options,
-    credentials: "include",         // sends httpOnly cookie automatically
-    headers: {
-      "Content-Type": "application/json",
-      ...((options.headers as Record<string, string>) || {}),
-    },
-  });
+// Describes the claims our backend puts in the JWT — no `any` needed.
+interface JwtPayload {
+  id?: number;
+  userId?: number;
+  sub?: string;
+  name?: string;
+  fullName?: string;
+  email?: string;
+  role?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  avatar?: string;
+  profilePicture?: string;
+  phone?: string;
+  bio?: string;
+  location?: string;
+  website?: string;
+  [key: string]: unknown; // allow other standard JWT claims
 }
 
+const parseJwt = (token: string): JwtPayload | null => {
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return null;
+    const decoded = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
+    return JSON.parse(decoded);
+  } catch {
+    return null;
+  }
+};
+
+const getUserFromToken = (token: string): AuthUser | null => {
+  const payload = parseJwt(token);
+  if (!payload) return null;
+
+  return {
+    // payload.id / userId are numbers in our DB; AuthUser.id is string
+    id: (payload.id ?? payload.userId)?.toString() ?? payload.sub,
+    name: payload.name || payload.fullName || "",
+    email: payload.email || "",
+    role: payload.role || "user",
+    createdAt: payload.createdAt || undefined,
+    updatedAt: payload.updatedAt || undefined,
+    avatar: payload.avatar || payload.profilePicture || "",
+    phone: payload.phone || "",
+    bio: payload.bio || "",
+    location: payload.location || "",
+    website: payload.website || "",
+  };
+};
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  // We keep `token` in state so existing pages that read
-  // `const { token } = useAuth()` continue to work.
-  // In the new architecture, this holds the token returned
-  // by the login response body — it is NOT in localStorage.
   const [token, setToken] = useState<string | null>(null);
-  const [user, setUser]   = useState<AuthUser | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // ── Fetch user profile from server ───────────────────────
-  const fetchUserProfile = useCallback(async () => {
-    try {
-      const res = await apiFetch("/api/auth/me");
-      if (!res.ok) {
-        setUser(null);
-        setToken(null);
-        return;
-      }
-      const data = await res.json();
-      setUser(data?.user || data);
-    } catch {
-      setUser(null);
-      setToken(null);
-    }
+  const clearAuth = useCallback(() => {
+    localStorage.removeItem(TOKEN_KEY);
+    setToken(null);
+    setUser(null);
   }, []);
 
-  // ── Bootstrap: check if session cookie already exists ────
-  useEffect(() => {
-    (async () => {
-      await fetchUserProfile();
-      setIsLoading(false);
-    })();
-  }, [fetchUserProfile]);
-
-  // ── login(token) — same signature as before ───────────────
-  // Login.tsx and SignUp.tsx call: await authLogin(data.token)
-  // This function receives that token, stores it in state
-  // (for any page reading `token`), then fetches the full
-  // profile from /api/auth/me using the httpOnly cookie
-  // that the server already set in the login response.
-  const login = useCallback(
+  const fetchUserProfile = useCallback(
     async (authToken: string) => {
-      // Keep token in memory (NOT localStorage)
+      try {
+        const res = await fetch(`${API_URL}/api/auth/me`, {
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+          },
+        });
+
+        if (!res.ok) {
+          throw new Error("Unable to fetch profile");
+        }
+
+        const data = await res.json();
+        const profile = data?.user || data;
+
+        // If recruiter, also pull fresh verification status so the route guard
+        // picks up admin approvals without requiring a re-login.
+        let recruiterData: Partial<AuthUser> = {};
+        if (profile.role === "recruiter") {
+          try {
+            const rRes = await fetch(`${API_URL}/api/recruiter/profile`, {
+              headers: { Authorization: `Bearer ${authToken}` },
+            });
+            if (rRes.ok) {
+              const rData = await rRes.json();
+              recruiterData = {
+                companyTier: rData.company_tier,
+                verificationStatus: rData.verification_status,
+              };
+            }
+          } catch { /* non-fatal — fall through with profile only */ }
+        }
+
+        setUser((prev) => ({
+          ...prev,
+          ...profile,
+          ...recruiterData,
+        }));
+      } catch {
+        const decodedUser = getUserFromToken(authToken);
+        setUser(decodedUser);
+      }
+    },
+    []
+  );
+
+  const login = useCallback(
+    async (authToken: string, extraUserData?: Partial<AuthUser>) => {
+      localStorage.setItem(TOKEN_KEY, authToken);
       setToken(authToken);
-      // Fetch full profile — cookie is sent automatically
-      await fetchUserProfile();
+
+      const decodedUser = getUserFromToken(authToken);
+      // Merge any extra fields from the login response (e.g. companyTier,
+      // verificationStatus) that aren't in the JWT payload.
+      setUser({ ...decodedUser, ...extraUserData });
+
+      await fetchUserProfile(authToken);
     },
     [fetchUserProfile]
   );
 
-  // ── logout ────────────────────────────────────────────────
-  const logout = useCallback(async () => {
-    try {
-      await apiFetch("/api/auth/logout", { method: "POST" });
-    } catch {
-      // ignore network errors
-    } finally {
-      setToken(null);
-      setUser(null);
-    }
-  }, []);
+  const logout = useCallback(() => {
+    clearAuth();
+  }, [clearAuth]);
 
-  // ── refreshUser ───────────────────────────────────────────
   const refreshUser = useCallback(async () => {
-    await fetchUserProfile();
-  }, [fetchUserProfile]);
+    if (!token) return;
+    await fetchUserProfile(token);
+  }, [fetchUserProfile, token]);
 
-  // ── updateUser ────────────────────────────────────────────
   const updateUser = useCallback(
     async (updates: Partial<AuthUser>) => {
+      if (!token) {
+        throw new Error("You are not authenticated");
+      }
+
       const previousUser = user;
-      setUser((prev) => prev ? { ...prev, ...updates } : prev);
+
+      setUser((prev) => ({
+        ...prev,
+        ...updates,
+      }));
 
       try {
-        const res = await apiFetch("/api/auth/me", {
+        const res = await fetch(`${API_URL}/api/auth/me`, {
           method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
           body: JSON.stringify(updates),
         });
 
         const data = await res.json().catch(() => null);
+
         if (!res.ok) {
           throw new Error(data?.message || "Failed to update profile");
         }
 
-        const updated = data?.user || data;
-        if (updated && typeof updated === "object") {
-          setUser((prev) => prev ? { ...prev, ...updated } : updated);
+        const updatedProfile = data?.user || data;
+
+        if (updatedProfile && typeof updatedProfile === "object") {
+          setUser((prev) => ({
+            ...prev,
+            ...updatedProfile,
+          }));
         } else {
-          await fetchUserProfile();
+          await refreshUser();
         }
-      } catch (err) {
+      } catch (error) {
         setUser(previousUser);
-        throw err;
+        throw error;
       }
     },
-    [user, fetchUserProfile]
+    [token, user, refreshUser]
   );
+
+  useEffect(() => {
+    const bootstrap = async () => {
+      const storedToken = localStorage.getItem(TOKEN_KEY);
+
+      if (!storedToken) {
+        setIsLoading(false);
+        return;
+      }
+
+      setToken(storedToken);
+
+      const decodedUser = getUserFromToken(storedToken);
+      setUser(decodedUser);
+
+      try {
+        await fetchUserProfile(storedToken);
+      } catch {
+        clearAuth();
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    bootstrap();
+  }, [clearAuth, fetchUserProfile]);
+
+  const isRecruiter = user?.role === "recruiter";
+  const isVerifiedRecruiter = isRecruiter && user?.verificationStatus === "verified";
 
   const value = useMemo(
     () => ({
       user,
       token,
-      isAuthenticated: !!user,
+      isAuthenticated: !!token,
       isLoading,
+      isRecruiter,
+      isVerifiedRecruiter,
       login,
       logout,
       refreshUser,
       updateUser,
     }),
-    [user, token, isLoading, login, logout, refreshUser, updateUser]
+    [user, token, isLoading, isRecruiter, isVerifiedRecruiter, login, logout, refreshUser, updateUser]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
