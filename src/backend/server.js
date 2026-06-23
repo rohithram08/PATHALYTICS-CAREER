@@ -70,7 +70,7 @@ app.use(
 //   • EXTRA_ORIGINS env var — comma-separated, for custom domains / staging
 //   • localhost for local development
 const PROD_ORIGIN    = process.env.FRONTEND_URL || "https://pathalytics.vercel.app";
-const VERCEL_PATTERN = /^https:\/\/pathalytics(-[a-z0-9-]+)?\.vercel\.app$/;
+const VERCEL_PATTERN = /^https:\/\/pathalytics[a-z0-9-]*\.vercel\.app$/i;
 const EXTRA_ORIGINS  = (process.env.EXTRA_ORIGINS || "")
   .split(",").map((o) => o.trim()).filter(Boolean);
 
