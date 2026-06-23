@@ -60,8 +60,23 @@ const initSchema = async () => {
       await addColumnIfMissing("users", "email_verify_token", "VARCHAR(255) NULL");
       await addColumnIfMissing("users", "failed_login_attempts", "INT DEFAULT 0");
       await addColumnIfMissing("users", "locked_until", "DATETIME NULL");
-      // role column – user | recruiter
-      await addColumnIfMissing("users", "role", "ENUM('user','recruiter') DEFAULT 'user'");
+
+      // ── FIX: Always ensure role column is the correct ENUM type ──
+      // addColumnIfMissing won't fix an existing column that has the
+      // wrong type (e.g. varchar(50) from the original login.sql).
+      // This MODIFY runs every startup but is a no-op if already correct.
+      try {
+        await db.query(`
+          ALTER TABLE users
+          MODIFY COLUMN role
+            ENUM('user','admin','mentor','recruiter')
+            NOT NULL DEFAULT 'user'
+        `);
+        console.log("✅ users.role column verified/fixed.");
+      } catch (err) {
+        console.error("❌ Failed to fix users.role column:", err.message);
+      }
+
       try {
         await db.query("ALTER TABLE users MODIFY COLUMN password VARCHAR(255) DEFAULT ''");
       } catch { /* already correct */ }
