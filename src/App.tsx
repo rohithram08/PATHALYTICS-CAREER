@@ -1,3 +1,4 @@
+// src/App.tsx
 import { lazy, Suspense, useEffect } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -7,6 +8,7 @@ import { ThemeProvider } from "next-themes";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import RecruiterGuard from "@/components/recruiter/RecruiterGuard";
+import RecruiterLayout from "@/components/recruiter/RecruiterLayout"; // ← NEW
 import LoadingScreen from "@/components/LoadingScreen";
 import { AuthProvider } from "@/contexts/AuthContext";
 import AuthCallback from "./pages/AuthCallback";
@@ -16,46 +18,47 @@ import InterviewSession from "@/pages/InterviewSession";
 import InterviewResults from "@/pages/InterviewResults";
 import CareerTipDetail from "@/pages/CareerTipDetail";
 
-// ── New legal + about pages (NOT lazy — small, always needed) ──
-import About           from "@/pages/About";
-import PrivacyPolicy   from "@/pages/PrivacyPolicy";
-import TermsOfService  from "@/pages/TermsOfService";
+// ── Static / legal pages (small, always needed — not lazy) ────────────
+import About          from "@/pages/About";
+import PrivacyPolicy  from "@/pages/PrivacyPolicy";
+import TermsOfService from "@/pages/TermsOfService";
 
 // ----------------------------------------------------------------------
 // Lazy-loaded pages (code splitting)
 // ----------------------------------------------------------------------
 
 // Public
-const Dashboard                  = lazy(() => import("./pages/Dashboard"));
-const Login                      = lazy(() => import("./pages/Login"));
-const SignUp                     = lazy(() => import("./pages/SignUp"));
-const ForgotPassword             = lazy(() => import("./pages/ForgotPassword"));
-const Blog                       = lazy(() => import("./pages/Blog"));
-const Jobs                       = lazy(() => import("./pages/Jobs"));
-const CareerTips                 = lazy(() => import("./pages/CareerTips"));
-const IndustryInsights           = lazy(() => import("./pages/IndustryInsights"));
-const SuccessStories             = lazy(() => import("./pages/SuccessStories"));
-const NotFound                   = lazy(() => import("./pages/NotFound"));
+const Dashboard                   = lazy(() => import("./pages/Dashboard"));
+const Login                       = lazy(() => import("./pages/Login"));
+const SignUp                       = lazy(() => import("./pages/SignUp"));
+const ForgotPassword              = lazy(() => import("./pages/ForgotPassword"));
+const Blog                        = lazy(() => import("./pages/Blog"));
+const Jobs                        = lazy(() => import("./pages/Jobs"));
+const CareerTips                  = lazy(() => import("./pages/CareerTips"));
+const IndustryInsights            = lazy(() => import("./pages/IndustryInsights"));
+const SuccessStories              = lazy(() => import("./pages/SuccessStories"));
+const NotFound                    = lazy(() => import("./pages/NotFound"));
 
-// Protected
-const Profile                    = lazy(() => import("./pages/Profile"));
-const CareerRecommendationInput  = lazy(() => import("./pages/CareerRecommendationInput"));
-const CareerRecommendationResults= lazy(() => import("./pages/CareerRecommendationResults"));
-const CareerRoadmaps             = lazy(() => import("./pages/CareerRoadmaps"));
-const CareerRoadmapDetail        = lazy(() => import("./pages/CareerRoadmapDetail"));
-const Chatbot                    = lazy(() => import("./pages/Chatbot"));
-const SavedCareers               = lazy(() => import("./pages/SavedCareers"));
-const Settings                   = lazy(() => import("./pages/Settings"));
-const ChangePassword             = lazy(() => import("./pages/ChangePassword"));
-const TwoFactorAuth              = lazy(() => import("./pages/TwoFactorAuth"));
-const OAuthSuccess               = lazy(() => import("./pages/OAuthSuccess"));
+// Protected (student/user)
+const Profile                     = lazy(() => import("./pages/Profile"));
+const CareerRecommendationInput   = lazy(() => import("./pages/CareerRecommendationInput"));
+const CareerRecommendationResults = lazy(() => import("./pages/CareerRecommendationResults"));
+const CareerRoadmaps              = lazy(() => import("./pages/CareerRoadmaps"));
+const CareerRoadmapDetail         = lazy(() => import("./pages/CareerRoadmapDetail"));
+const Chatbot                     = lazy(() => import("./pages/Chatbot"));
+const SavedCareers                = lazy(() => import("./pages/SavedCareers"));
+const Settings                    = lazy(() => import("./pages/Settings"));
+const ChangePassword              = lazy(() => import("./pages/ChangePassword"));
+const TwoFactorAuth               = lazy(() => import("./pages/TwoFactorAuth"));
+const OAuthSuccess                = lazy(() => import("./pages/OAuthSuccess"));
 
-// Recruiter pages (lazy — only loaded when a recruiter is logged in)
-const RecruiterDashboard         = lazy(() => import("./pages/recruiter/RecruiterDashboard"));
-const PostJob                    = lazy(() => import("./pages/recruiter/PostJob"));
-const ManageJobs                 = lazy(() => import("./pages/recruiter/ManageJobs"));
-const ApplicationsReview        = lazy(() => import("./pages/recruiter/ApplicationsReview"));
-const RecruiterProfileSetup      = lazy(() => import("./pages/recruiter/RecruiterProfileSetup"));
+// Recruiter pages
+const RecruiterDashboard          = lazy(() => import("./pages/recruiter/RecruiterDashboard"));
+const PostJob                     = lazy(() => import("./pages/recruiter/PostJob"));
+const ManageJobs                  = lazy(() => import("./pages/recruiter/ManageJobs"));
+const ApplicationsReview         = lazy(() => import("./pages/recruiter/ApplicationsReview"));
+const RecruiterProfileSetup       = lazy(() => import("./pages/recruiter/RecruiterProfileSetup"));
+const EditJob                     = lazy(() => import("./pages/recruiter/EditJob")); // ← NEW
 
 // ----------------------------------------------------------------------
 // React Query client
@@ -129,36 +132,55 @@ const App = () => (
                   <Route path="/privacy-policy"     element={<PrivacyPolicy />} />
                   <Route path="/terms-of-service"   element={<TermsOfService />} />
 
-                  {/* ── Protected routes ── */}
+                  {/* ── Protected routes (students / regular users) ── */}
                   <Route element={<ProtectedRoute />}>
-                    <Route path="/dashboard"                    element={<Dashboard />} />
-                    <Route path="/profile"                      element={<Profile />} />
-                    <Route path="/career-recommendation"        element={<CareerRecommendationInput />} />
-                    <Route path="/career-recommendation/results" element={<CareerRecommendationResults />} />
-                    <Route path="/interview"                    element={<InterviewLanding />} />
-                    <Route path="/interview/:careerId/session"  element={<InterviewSession />} />
-                    <Route path="/interview/:careerId/results"  element={<InterviewResults />} />
-                    <Route path="/roadmaps"                     element={<CareerRoadmaps />} />
-                    <Route path="/roadmaps/:careerId"           element={<CareerRoadmapDetail />} />
-                    <Route path="/chatbot"                      element={<Chatbot />} />
-                    <Route path="/saved-careers"                element={<SavedCareers />} />
-                    <Route path="/settings"                     element={<Settings />} />
-                    <Route path="/change-password"              element={<ChangePassword />} />
-                    <Route path="/two-factor-auth"              element={<TwoFactorAuth />} />
-                    <Route path="/career-tips/:id"             element={<CareerTipDetail />} />
+                    <Route path="/dashboard"                      element={<Dashboard />} />
+                    <Route path="/profile"                        element={<Profile />} />
+                    <Route path="/career-recommendation"          element={<CareerRecommendationInput />} />
+                    <Route path="/career-recommendation/results"  element={<CareerRecommendationResults />} />
+                    <Route path="/interview"                      element={<InterviewLanding />} />
+                    <Route path="/interview/:careerId/session"    element={<InterviewSession />} />
+                    <Route path="/interview/:careerId/results"    element={<InterviewResults />} />
+                    <Route path="/roadmaps"                       element={<CareerRoadmaps />} />
+                    <Route path="/roadmaps/:careerId"             element={<CareerRoadmapDetail />} />
+                    <Route path="/chatbot"                        element={<Chatbot />} />
+                    <Route path="/saved-careers"                  element={<SavedCareers />} />
+                    <Route path="/settings"                       element={<Settings />} />
+                    <Route path="/change-password"                element={<ChangePassword />} />
+                    <Route path="/two-factor-auth"                element={<TwoFactorAuth />} />
+                    <Route path="/career-tips/:id"                element={<CareerTipDetail />} />
                   </Route>
 
-                  {/* ── Recruiter routes (any verified recruiter) ── */}
+                  {/* ── Recruiter routes ────────────────────────────────────────────
+                  //
+                  //  Structure:
+                  //    RecruiterGuard          → checks isAuthenticated + isRecruiter
+                  //      RecruiterLayout       → persistent sidebar, nav, logout
+                  //        <pages>             → any logged-in recruiter can see these
+                  //        RecruiterGuard (requireVerified)
+                  //          PostJob           → only verified recruiters reach this
+                  //
+                  //  Why one outer layout instead of two separate <Route element>
+                  //  blocks: a single RecruiterLayout instance means no remount
+                  //  (and no sidebar flash) when navigating between normal recruiter
+                  //  pages and the PostJob page.
+                  // ── */}
                   <Route element={<RecruiterGuard />}>
-                    <Route path="/recruiter/profile"                      element={<RecruiterProfileSetup />} />
-                    <Route path="/recruiter/dashboard"                    element={<RecruiterDashboard />} />
-                    <Route path="/recruiter/jobs"                         element={<ManageJobs />} />
-                    <Route path="/recruiter/jobs/:jobId/applications"     element={<ApplicationsReview />} />
-                  </Route>
+                    <Route element={<RecruiterLayout />}>
 
-                  {/* Recruiter routes that need verification to access */}
-                  <Route element={<RecruiterGuard requireVerified />}>
-                    <Route path="/recruiter/jobs/new"                     element={<PostJob />} />
+                      {/* Any logged-in recruiter */}
+                      <Route path="/recruiter/profile"                      element={<RecruiterProfileSetup />} />
+                      <Route path="/recruiter/dashboard"                    element={<RecruiterDashboard />} />
+                      <Route path="/recruiter/jobs"                         element={<ManageJobs />} />
+                      <Route path="/recruiter/jobs/:jobId/applications"     element={<ApplicationsReview />} />
+                      <Route path="/recruiter/jobs/:jobId/edit"             element={<EditJob />} />  {/* ← NEW */}
+
+                      {/* Verified recruiters only — inner guard redirects to /recruiter/profile if not verified */}
+                      <Route element={<RecruiterGuard requireVerified />}>
+                        <Route path="/recruiter/jobs/new"                   element={<PostJob />} />
+                      </Route>
+
+                    </Route>
                   </Route>
 
                   {/* ── 404 catch-all ── */}

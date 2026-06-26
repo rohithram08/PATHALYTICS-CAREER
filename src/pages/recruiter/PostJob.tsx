@@ -16,15 +16,21 @@ import { useAuth } from "@/hooks/useAuth";
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 const STAGE_TYPES = [
-  { value: "screening", label: "Resume Screening" },
+  { value: "screening",     label: "Resume Screening" },
   { value: "aptitude_test", label: "Aptitude Test" },
-  { value: "interview", label: "Interview" },
-  { value: "assignment", label: "Assignment" },
-  { value: "offer", label: "Offer" },
-  { value: "custom", label: "Custom" },
+  { value: "interview",     label: "Interview" },
+  { value: "assignment",    label: "Assignment" },
+  { value: "offer",         label: "Offer" },
+  { value: "custom",        label: "Custom" },
 ];
 
+// FIX: added _key so AnimatePresence can uniquely identify each stage.
+// Using array index as key means removing stage B from [A, B, C] shifts
+// indices, and AnimatePresence animates the wrong item out.
+// _key is stable for the lifetime of the component; stripped before sending
+// to the backend.
 interface Stage {
+  _key: string;
   stageName: string;
   stageType: string;
 }
@@ -33,6 +39,10 @@ const emptyJob = {
   title: "", description: "", location: "", jobType: "full-time",
   salaryMin: "", salaryMax: "", applicationMode: "internal", externalApplyUrl: "",
 };
+
+function makeKey() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 const PostJob = () => {
   const navigate = useNavigate();
@@ -43,8 +53,8 @@ const PostJob = () => {
   const [jobId, setJobId] = useState<number | null>(null);
   const [job, setJob] = useState(emptyJob);
   const [stages, setStages] = useState<Stage[]>([
-    { stageName: "Resume Screening", stageType: "screening" },
-    { stageName: "Technical Interview", stageType: "interview" },
+    { _key: makeKey(), stageName: "Resume Screening",  stageType: "screening" },
+    { _key: makeKey(), stageName: "Technical Interview", stageType: "interview" },
   ]);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -56,11 +66,11 @@ const PostJob = () => {
   const validateStep1 = () => {
     const e: Record<string, string> = {};
     if (!job.title.trim()) e.title = "Title is required";
-    if (!job.description.trim() || job.description.length < 20) e.description = "Description must be at least 20 characters";
+    if (!job.description.trim() || job.description.length < 20)
+      e.description = "Description must be at least 20 characters";
     if (!job.location.trim()) e.location = "Location is required";
-    if (job.applicationMode === "external" && !job.externalApplyUrl.trim()) {
+    if (job.applicationMode === "external" && !job.externalApplyUrl.trim())
       e.externalApplyUrl = "Paste the external application URL";
-    }
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -90,13 +100,17 @@ const PostJob = () => {
   };
 
   const addStage = () =>
-    setStages((p) => [...p, { stageName: "", stageType: "custom" }]);
+    setStages((p) => [...p, { _key: makeKey(), stageName: "", stageType: "custom" }]);
 
-  const removeStage = (i: number) =>
-    setStages((p) => p.filter((_, idx) => idx !== i));
+  const removeStage = (key: string) =>
+    setStages((p) => p.filter((s) => s._key !== key));
 
-  const updateStage = (i: number, k: keyof Stage, v: string) =>
-    setStages((p) => p.map((s, idx) => (idx === i ? { ...s, [k]: v } : s)));
+  const updateStage = (key: string, field: "stageName" | "stageType", value: string) =>
+    setStages((p) => p.map((s) => (s._key === key ? { ...s, [field]: value } : s)));
+
+  // Strip _key before sending to backend
+  const stagesPayload = () =>
+    stages.map(({ stageName, stageType }) => ({ stageName, stageType }));
 
   const publish = async () => {
     if (stages.some((s) => !s.stageName.trim())) {
@@ -105,15 +119,13 @@ const PostJob = () => {
     }
     setPublishing(true);
     try {
-      // Save stages first
       const stageRes = await fetch(`${API_URL}/api/jobs/${jobId}/stages`, {
         method: "PUT",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(stages),
+        body: JSON.stringify(stagesPayload()),
       });
       if (!stageRes.ok) throw new Error((await stageRes.json()).message);
 
-      // Then publish
       const pubRes = await fetch(`${API_URL}/api/jobs/${jobId}/publish`, {
         method: "PATCH",
         headers: { Authorization: `Bearer ${token}` },
@@ -136,7 +148,7 @@ const PostJob = () => {
       await fetch(`${API_URL}/api/jobs/${jobId}/stages`, {
         method: "PUT",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(stages),
+        body: JSON.stringify(stagesPayload()),
       });
       toast.success("Saved as draft");
       navigate("/recruiter/jobs");
@@ -259,16 +271,28 @@ const PostJob = () => {
 
             <AnimatePresence>
               {stages.map((stage, i) => (
-                <motion.div key={i}
+                // FIX: use stage._key instead of index `i` as the key.
+                // AnimatePresence needs a stable key to know which item
+                // was removed so it can play the exit animation on the
+                // correct element.
+                <motion.div
+                  key={stage._key}
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: "auto" }}
                   exit={{ opacity: 0, height: 0 }}
-                  className="flex items-start gap-3">
+                  className="flex items-start gap-3"
+                >
                   <GripVertical className="w-4 h-4 mt-3 text-muted-foreground shrink-0" />
                   <div className="flex-1 grid grid-cols-2 gap-3">
-                    <Input placeholder={`Stage ${i + 1} name`} value={stage.stageName}
-                      onChange={(e) => updateStage(i, "stageName", e.target.value)} />
-                    <Select value={stage.stageType} onValueChange={(v) => updateStage(i, "stageType", v)}>
+                    <Input
+                      placeholder={`Stage ${i + 1} name`}
+                      value={stage.stageName}
+                      onChange={(e) => updateStage(stage._key, "stageName", e.target.value)}
+                    />
+                    <Select
+                      value={stage.stageType}
+                      onValueChange={(v) => updateStage(stage._key, "stageType", v)}
+                    >
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {STAGE_TYPES.map((t) => (
@@ -278,8 +302,11 @@ const PostJob = () => {
                     </Select>
                   </div>
                   {stages.length > 1 && (
-                    <button type="button" onClick={() => removeStage(i)}
-                      className="mt-2 text-muted-foreground hover:text-destructive transition-colors">
+                    <button
+                      type="button"
+                      onClick={() => removeStage(stage._key)}
+                      className="mt-2 text-muted-foreground hover:text-destructive transition-colors"
+                    >
                       <Trash2 className="w-4 h-4" />
                     </button>
                   )}
