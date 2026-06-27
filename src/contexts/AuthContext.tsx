@@ -148,9 +148,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           } catch { /* non-fatal — fall through with profile only */ }
         }
 
+
         setUser((prev) => ({
           ...prev,
           ...profile,
+          role: profile.role ?? prev?.role,
           ...recruiterData,
         }));
       } catch {
