@@ -252,14 +252,6 @@ router.put(
   }
 );
 
-// ── Recruiter: fetch a single job for editing ───────────────────────
-router.get(
-  "/:id",
-  requireAuth,
-  requireRole("recruiter"),
-  requireOwnJob,
-  (req, res) => res.json(req.job)   // requireOwnJob already attached the row
-);
 
 // ── Public / user-facing: published internal jobs ────────────────────
 // This is what JobListings.tsx merges with its Adzuna/Greenhouse results.
@@ -298,5 +290,14 @@ router.get("/internal/:id", async (req, res) => {
     return res.status(500).json({ message: "Server error" });
   }
 });
+
+// ── Recruiter: fetch a single job for editing ───────────────────────
+router.get(
+  "/:id",
+  requireAuth,
+  requireRole("recruiter"),
+  requireOwnJob,
+  (req, res) => res.json(req.job)   // requireOwnJob already attached the row
+);
 
 export default router;
