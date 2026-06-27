@@ -1,299 +1,200 @@
-// src/backend/routes/jobs.js
-import express from "express";
-import { z } from "zod";
-import db from "../db.js";
-import { requireAuth, requireRole, requireVerifiedRecruiter } from "../middleware/auth.js";
+// src/pages/AdminVerifications.tsx
+//
+// Admin-only page. Accessible via /admin/verifications.
+// To make a user an admin, run in your DB:
+//   UPDATE users SET role = 'admin' WHERE email = 'your@email.com';
 
-const router = express.Router();
+import { useEffect, useState, useCallback } from "react";
+import { motion } from "framer-motion";
+import {
+  CheckCircle2, XCircle, FileText, Building2,
+  Clock, Loader2, ShieldCheck,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { toast } from "sonner";
+import { useAuth } from "@/hooks/useAuth";
 
-// ── Validation ─────────────────────────────────────────────────────
-const jobSchema = z
-  .object({
-    title: z.string().min(3).max(150).trim(),
-    description: z.string().min(20).trim(),
-    location: z.string().min(2).max(150).trim(),
-    jobType: z.enum(["full-time", "part-time", "internship", "contract"]).default("full-time"),
-    salaryMin: z.number().int().positive().optional(),
-    salaryMax: z.number().int().positive().optional(),
-    applicationMode: z.enum(["internal", "external"]).default("internal"),
-    externalApplyUrl: z.string().url().optional(),
-  })
-  .superRefine((data, ctx) => {
-    if (data.applicationMode === "external" && !data.externalApplyUrl) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["externalApplyUrl"],
-        message: "External apply URL is required when application mode is external",
-      });
-    }
-  });
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
-const stageSchema = z.object({
-  stageName: z.string().min(2).max(100).trim(),
-  stageType: z
-    .enum(["screening", "aptitude_test", "interview", "assignment", "offer", "custom"])
-    .default("custom"),
-});
-// 1–20 stages, recruiter's choice — the count is never fixed in code.
-const stagesSchema = z.array(stageSchema).min(1).max(20);
+interface PendingDoc {
+  id: number;
+  document_type: string;
+  original_filename: string;
+  uploaded_at: string;
+  company_name: string;
+  company_tier: string;
+  recruiter_user_id: number;
+  recruiter_name: string;
+  recruiter_email: string;
+}
 
-// ── Ownership check, reused across the recruiter-only routes below ──
-export const requireOwnJob = async (req, res, next) => {
-  try {
-    const [rows] = await db.query("SELECT * FROM jobs WHERE id = ?", [req.params.id]);
-    if (rows.length === 0) return res.status(404).json({ message: "Job not found" });
-    if (rows[0].recruiter_id !== req.user.id) {
-      return res.status(403).json({ message: "Forbidden" });
-    }
-    req.job = rows[0];
-    next();
-  } catch (err) {
-    console.error("[jobs:ownership-check]", err);
-    return res.status(500).json({ message: "Server error" });
-  }
+const docTypeLabel: Record<string, string> = {
+  incorporation_certificate: "Incorporation certificate",
+  gst_certificate: "GST certificate",
+  company_pan: "Company PAN",
+  other: "Other",
 };
 
-// ── Recruiter-side: create & manage own jobs ─────────────────────────
-// Creating a draft does NOT require verification — a recruiter shouldn't
-// be locked out of the platform while their documents are under review.
-// Verification is enforced at /publish instead, the point where a job
-// actually becomes visible to candidates.
-router.post("/", requireAuth, requireRole("recruiter"), async (req, res) => {
-  try {
-    const parsed = jobSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res
-        .status(400)
-        .json({ message: "Validation failed", errors: parsed.error.flatten().fieldErrors });
-    }
-    const {
-      title, description, location, jobType,
-      salaryMin, salaryMax, applicationMode, externalApplyUrl,
-    } = parsed.data;
+const AdminVerifications = () => {
+  const { token } = useAuth();
+  const [docs, setDocs] = useState<PendingDoc[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [actioning, setActioning] = useState<number | null>(null);
+  const [rejectReason, setRejectReason] = useState<Record<number, string>>({});
 
-    const [result] = await db.query(
-      `INSERT INTO jobs
-         (recruiter_id, title, description, location, job_type, salary_min, salary_max, application_mode, external_apply_url, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')`,
-      [
-        req.user.id, title, description, location, jobType,
-        salaryMin ?? null, salaryMax ?? null, applicationMode, externalApplyUrl ?? null,
-      ]
-    );
-
-    return res.status(201).json({ id: result.insertId, status: "draft" });
-  } catch (err) {
-    console.error("[jobs:create]", err);
-    return res.status(500).json({ message: "Server error" });
-  }
-});
-
-router.get("/mine", requireAuth, requireRole("recruiter"), async (req, res) => {
-  try {
-    const [rows] = await db.query(
-      `SELECT j.*,
-              (SELECT COUNT(*) FROM applications a WHERE a.job_id = j.id) AS applicant_count
-       FROM jobs j
-       WHERE j.recruiter_id = ?
-       ORDER BY j.created_at DESC`,
-      [req.user.id]
-    );
-    return res.json(rows);
-  } catch (err) {
-    console.error("[jobs:mine]", err);
-    return res.status(500).json({ message: "Server error" });
-  }
-});
-
-router.patch("/:id", requireAuth, requireRole("recruiter"), requireOwnJob, async (req, res) => {
-  try {
-    const parsed = jobSchema.partial().safeParse(req.body);
-    if (!parsed.success) {
-      return res
-        .status(400)
-        .json({ message: "Validation failed", errors: parsed.error.flatten().fieldErrors });
-    }
-    const columnMap = {
-      title: "title",
-      description: "description",
-      location: "location",
-      jobType: "job_type",
-      salaryMin: "salary_min",
-      salaryMax: "salary_max",
-      applicationMode: "application_mode",
-      externalApplyUrl: "external_apply_url",
-    };
-    const sets = [];
-    const values = [];
-    for (const [key, col] of Object.entries(columnMap)) {
-      if (parsed.data[key] !== undefined) {
-        sets.push(`${col} = ?`);
-        values.push(parsed.data[key]);
-      }
-    }
-    if (sets.length === 0) return res.status(400).json({ message: "No fields to update" });
-    values.push(req.params.id);
-
-    await db.query(`UPDATE jobs SET ${sets.join(", ")} WHERE id = ?`, values);
-    return res.json({ message: "Job updated" });
-  } catch (err) {
-    console.error("[jobs:update]", err);
-    return res.status(500).json({ message: "Server error" });
-  }
-});
-
-// The fraud-control checkpoint — only a verified recruiter can make a
-// job actually visible to candidates.
-router.patch(
-  "/:id/publish",
-  requireAuth,
-  requireRole("recruiter"),
-  requireVerifiedRecruiter,
-  requireOwnJob,
-  async (req, res) => {
+  const load = useCallback(async () => {
     try {
-      const [stages] = await db.query("SELECT id FROM pipeline_stages WHERE job_id = ?", [
-        req.params.id,
-      ]);
-      if (stages.length === 0) {
-        return res
-          .status(400)
-          .json({ message: "Add at least one pipeline stage before publishing" });
-      }
-      await db.query(
-        "UPDATE jobs SET status = 'published', published_at = NOW() WHERE id = ?",
-        [req.params.id]
-      );
-      return res.json({ message: "Job published" });
-    } catch (err) {
-      console.error("[jobs:publish]", err);
-      return res.status(500).json({ message: "Server error" });
-    }
-  }
-);
-
-router.patch(
-  "/:id/close",
-  requireAuth,
-  requireRole("recruiter"),
-  requireOwnJob,
-  async (req, res) => {
-    try {
-      await db.query("UPDATE jobs SET status = 'closed', closed_at = NOW() WHERE id = ?", [
-        req.params.id,
-      ]);
-      return res.json({ message: "Job closed" });
-    } catch (err) {
-      console.error("[jobs:close]", err);
-      return res.status(500).json({ message: "Server error" });
-    }
-  }
-);
-
-// ── Pipeline stages — recruiter defines exactly as many as they want ─
-router.get(
-  "/:id/stages",
-  requireAuth,
-  requireRole("recruiter"),
-  requireOwnJob,
-  async (req, res) => {
-    try {
-      const [rows] = await db.query(
-        "SELECT id, stage_order, stage_name, stage_type FROM pipeline_stages WHERE job_id = ? ORDER BY stage_order",
-        [req.params.id]
-      );
-      return res.json(rows);
-    } catch (err) {
-      console.error("[jobs:get-stages]", err);
-      return res.status(500).json({ message: "Server error" });
-    }
-  }
-);
-
-// Replaces the full stage list in one transaction. The recruiter sends
-// however many stages they want, in order — the count and the names
-// aren't fixed anywhere in this file.
-router.put(
-  "/:id/stages",
-  requireAuth,
-  requireRole("recruiter"),
-  requireOwnJob,
-  async (req, res) => {
-    const parsed = stagesSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten() });
-    }
-
-    const conn = await db.getConnection();
-    try {
-      await conn.beginTransaction();
-      await conn.query("DELETE FROM pipeline_stages WHERE job_id = ?", [req.params.id]);
-
-      let order = 1;
-      for (const stage of parsed.data) {
-        await conn.query(
-          "INSERT INTO pipeline_stages (job_id, stage_order, stage_name, stage_type) VALUES (?, ?, ?, ?)",
-          [req.params.id, order++, stage.stageName, stage.stageType]
-        );
-      }
-
-      await conn.commit();
-      return res.json({ message: `${parsed.data.length} stage(s) saved` });
-    } catch (err) {
-      await conn.rollback();
-      console.error("[jobs:set-stages]", err);
-      return res.status(500).json({ message: "Server error" });
+      const res = await fetch(`${API_URL}/api/admin/verifications`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error();
+      setDocs(await res.json());
+    } catch {
+      toast.error("Could not load pending documents");
     } finally {
-      conn.release();
+      setLoading(false);
     }
-  }
-);
+  }, [token]);
 
-// ── Recruiter: fetch a single job for editing ───────────────────────
-router.get(
-  "/:id",
-  requireAuth,
-  requireRole("recruiter"),
-  requireOwnJob,
-  (req, res) => res.json(req.job)   // requireOwnJob already attached the row
-);
+  useEffect(() => { load(); }, [load]);
 
-// ── Public / user-facing: published internal jobs ────────────────────
-// This is what JobListings.tsx merges with its Adzuna/Greenhouse results.
-// No auth required — matches how the external listings are fetched today.
-router.get("/internal", async (_req, res) => {
-  try {
-    const [rows] = await db.query(
-      `SELECT j.id, j.title, j.description, j.location, j.job_type, j.salary_min, j.salary_max,
-              j.application_mode, j.external_apply_url, j.published_at,
-              rp.company_name, rp.company_tier
-       FROM jobs j
-       JOIN recruiter_profiles rp ON rp.user_id = j.recruiter_id
-       WHERE j.status = 'published'
-       ORDER BY j.published_at DESC`
-    );
-    return res.json(rows);
-  } catch (err) {
-    console.error("[jobs:internal-list]", err);
-    return res.status(500).json({ message: "Server error" });
-  }
-});
+  const review = async (docId: number, action: "approve" | "reject") => {
+    if (action === "reject" && !rejectReason[docId]?.trim()) {
+      toast.error("Enter a rejection reason before rejecting");
+      return;
+    }
+    setActioning(docId);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/verifications/${docId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          action,
+          rejectionReason: rejectReason[docId] ?? null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      toast.success(action === "approve" ? "Document approved — recruiter notified" : "Document rejected — recruiter notified");
+      await load();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Action failed");
+    } finally {
+      setActioning(null);
+    }
+  };
 
-router.get("/internal/:id", async (req, res) => {
-  try {
-    const [rows] = await db.query(
-      `SELECT j.*, rp.company_name, rp.company_tier
-       FROM jobs j
-       JOIN recruiter_profiles rp ON rp.user_id = j.recruiter_id
-       WHERE j.id = ? AND j.status = 'published'`,
-      [req.params.id]
-    );
-    if (rows.length === 0) return res.status(404).json({ message: "Job not found" });
-    return res.json(rows[0]);
-  } catch (err) {
-    console.error("[jobs:internal-detail]", err);
-    return res.status(500).json({ message: "Server error" });
-  }
-});
+  return (
+    <div className="min-h-screen bg-background p-6 max-w-4xl mx-auto">
+      <div className="flex items-center gap-3 mb-8">
+        <ShieldCheck className="w-7 h-7 text-primary" />
+        <div>
+          <h1 className="text-3xl font-bold">Verification Queue</h1>
+          <p className="text-muted-foreground">Pending recruiter document reviews</p>
+        </div>
+      </div>
 
-export default router;
+      {loading ? (
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+        </div>
+      ) : docs.length === 0 ? (
+        <Card className="p-12 text-center">
+          <CheckCircle2 className="w-10 h-10 mx-auto text-emerald-500 mb-3" />
+          <p className="font-semibold text-lg">All caught up</p>
+          <p className="text-sm text-muted-foreground">No documents pending review</p>
+        </Card>
+      ) : (
+        <div className="space-y-4">
+          {docs.map((doc, i) => (
+            <motion.div key={doc.id}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.05 }}>
+              <Card className="p-5 space-y-4">
+                {/* Company + recruiter info */}
+                <div className="flex items-start gap-4">
+                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                    <Building2 className="w-5 h-5 text-primary" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-semibold">{doc.company_name}</h3>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 capitalize">
+                        {doc.company_tier} tier
+                      </span>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {doc.recruiter_name} · {doc.recruiter_email}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                      <Clock className="w-3 h-3" />
+                      {new Date(doc.uploaded_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Document info */}
+                <div className="flex items-center gap-3 p-3 rounded-lg border bg-muted/20">
+                  <FileText className="w-5 h-5 text-muted-foreground shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{doc.original_filename}</p>
+                    <p className="text-xs text-muted-foreground capitalize">
+                      {docTypeLabel[doc.document_type] ?? doc.document_type}
+                    </p>
+                  </div>
+                  <a
+                    href={`${API_URL}/api/admin/documents/${doc.id}/download`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-primary hover:underline shrink-0">
+                    View file
+                  </a>
+                </div>
+
+                {/* Rejection reason input */}
+                <Input
+                  placeholder="Rejection reason (required to reject)"
+                  value={rejectReason[doc.id] ?? ""}
+                  onChange={(e) =>
+                    setRejectReason((p) => ({ ...p, [doc.id]: e.target.value }))
+                  }
+                />
+
+                {/* Actions */}
+                <div className="flex gap-3">
+                  <Button
+                    className="flex-1 gap-2 bg-emerald-600 hover:bg-emerald-700"
+                    onClick={() => review(doc.id, "approve")}
+                    disabled={actioning === doc.id}>
+                    {actioning === doc.id
+                      ? <Loader2 className="w-4 h-4 animate-spin" />
+                      : <CheckCircle2 className="w-4 h-4" />}
+                    Approve
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="flex-1 gap-2 border-destructive text-destructive hover:bg-destructive hover:text-white"
+                    onClick={() => review(doc.id, "reject")}
+                    disabled={actioning === doc.id}>
+                    <XCircle className="w-4 h-4" />
+                    Reject
+                  </Button>
+                </div>
+              </Card>
+            </motion.div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default AdminVerifications;
