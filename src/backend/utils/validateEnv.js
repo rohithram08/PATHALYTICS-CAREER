@@ -1,8 +1,16 @@
 // src/backend/utils/validateEnv.js
 // ─────────────────────────────────────────────────────────────
-// Crash the server at startup if ANY required environment
-// variable is missing or insecure.  Better to crash loudly
-// at boot time than silently expose data at runtime.
+// Validate environment variables at startup.
+//
+// REQUIRED  — server refuses to boot if any of these are absent.
+// WARN_ONLY — server boots but logs a warning and the related
+//             feature is disabled/degraded at runtime. This is
+//             the right tier for EMAIL_* because:
+//             - Render free tier doesn't need email in all envs
+//             - It's better to boot without email than crash
+//               completely and block every other feature
+//             - Email routes already check for the vars and
+//               return 503 if missing
 // ─────────────────────────────────────────────────────────────
 
 const REQUIRED = [
@@ -12,26 +20,38 @@ const REQUIRED = [
   "DB_PASS",
   "DB_NAME",
   "FRONTEND_URL",
+];
+
+// These are needed for email OTP / verification emails.
+// Missing = email features disabled, NOT a fatal boot error.
+const WARN_ONLY = [
   "EMAIL_USER",
   "EMAIL_PASS",
 ];
 
-// Only required when OAuth is being used
-const OAUTH_REQUIRED = {
-  google: ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_CALLBACK_URL"],
-  github: ["GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "GITHUB_CALLBACK_URL"],
-};
+// Placeholder values that suggest someone copied a template but
+// forgot to fill in the real secrets.
+const DANGEROUS_VALUES = ["changeme", "secret", "password", "1234", "test"];
 
 export function validateEnv() {
   const missing = [];
 
+  // ── Hard-required vars ────────────────────────────────────
   for (const key of REQUIRED) {
     if (!process.env[key] || process.env[key].trim() === "") {
       missing.push(key);
     }
   }
 
-  // Check JWT_SECRET strength
+  if (missing.length > 0) {
+    throw new Error(
+      `\n❌ Missing required environment variables:\n  ${missing.join("\n  ")}\n` +
+      `\n  Add these to your .env file (development) or Render dashboard (production).\n` +
+      `  NEVER commit .env to git.\n`
+    );
+  }
+
+  // ── JWT strength check ────────────────────────────────────
   const jwt = process.env.JWT_SECRET || "";
   if (jwt.length < 64) {
     throw new Error(
@@ -40,24 +60,43 @@ export function validateEnv() {
     );
   }
 
-  // Check for placeholder / default values
-  const DANGEROUS_VALUES = ["changeme", "secret", "password", "1234", "test"];
-  for (const [key, val] of Object.entries(process.env)) {
-    if (REQUIRED.includes(key)) {
-      const lower = (val || "").toLowerCase();
-      if (DANGEROUS_VALUES.some((d) => lower.includes(d))) {
-        console.warn(`⚠️  WARNING: ${key} looks like a placeholder value. Replace it before production.`);
-      }
+  // ── Placeholder / default value check ────────────────────
+  const allRequired = [...REQUIRED, ...WARN_ONLY];
+  for (const key of allRequired) {
+    const val = process.env[key] || "";
+    const lower = val.toLowerCase();
+    if (val && DANGEROUS_VALUES.some((d) => lower.includes(d))) {
+      console.warn(`⚠️  WARNING: ${key} looks like a placeholder value. Replace it before production.`);
     }
   }
 
-  if (missing.length > 0) {
-    throw new Error(
-      `\n❌ Missing required environment variables:\n  ${missing.join("\n  ")}\n` +
-      `\n  Add these to your .env file (development) or Vercel / Render dashboard (production).\n` +
-      `  NEVER commit .env to git.\n`
+  // ── Warn-only vars (email) ────────────────────────────────
+  const missingWarn = WARN_ONLY.filter(
+    (key) => !process.env[key] || process.env[key].trim() === ""
+  );
+  if (missingWarn.length > 0) {
+    console.warn(
+      `⚠️  Email env vars not set: ${missingWarn.join(", ")}\n` +
+      `   Email features (OTP, verification, notifications) will be disabled.\n` +
+      `   Add EMAIL_USER and EMAIL_PASS in Render dashboard to enable them.`
     );
   }
 
   console.log("✅ Environment variables validated");
+}
+
+// ── Runtime helper ────────────────────────────────────────────
+// Call this in any route that needs email before trying to send.
+//
+//   import { isEmailConfigured } from "../utils/validateEnv.js";
+//
+//   if (!isEmailConfigured()) {
+//     return res.status(503).json({ message: "Email service not configured." });
+//   }
+//
+export function isEmailConfigured() {
+  return !!(
+    process.env.EMAIL_USER?.trim() &&
+    process.env.EMAIL_PASS?.trim()
+  );
 }

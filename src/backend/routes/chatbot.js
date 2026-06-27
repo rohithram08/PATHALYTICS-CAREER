@@ -17,28 +17,41 @@
 // ─────────────────────────────────────────────────────────────
 
 import express from "express";
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { z } from "zod";
 import { requireAuth } from "../middleware/auth.js";
 
 const router = express.Router();
 
-// Rate limit: 20 chat messages per user per minute
+// Rate limit: 20 chat messages per user per minute.
+//
+// WHY ipKeyGenerator here?
+//   express-rate-limit v7+ validates that any keyGenerator which falls
+//   back to req.ip uses their ipKeyGenerator helper.  The helper
+//   normalises IPv6 addresses (e.g. strips the "::ffff:" prefix that
+//   proxies add), preventing the same IPv6 user from bypassing limits
+//   by rotating /64 subnets.  When req.user?.id is present we key by
+//   user ID instead — no IP involved, no normalisation needed.
 const chatLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 20,
-  keyGenerator: (req) => String(req.user?.id || req.ip),  // per-user, not per-IP
+  keyGenerator: (req) =>
+    req.user?.id != null
+      ? `user:${req.user.id}`           // authenticated — key by user id
+      : ipKeyGenerator(req),            // unauthenticated fallback — IPv6-safe
   message: { message: "Too many messages. Please wait before sending another." },
 });
 
 // Input validation for chat messages
 const chatSchema = z.object({
-  message:          z.string().min(1).max(2000).trim(),
-  conversation_id:  z.string().max(100).optional(),
-  context:          z.object({
-    career:   z.string().max(200).optional(),
-    location: z.string().max(100).optional(),
-  }).optional(),
+  message:         z.string().min(1).max(2000).trim(),
+  conversation_id: z.string().max(100).optional(),
+  context: z
+    .object({
+      career:   z.string().max(200).optional(),
+      location: z.string().max(100).optional(),
+    })
+    .optional(),
 });
 
 // ── POST /api/chatbot/chat ─────────────────────────────────────
@@ -58,20 +71,20 @@ router.post("/chat", requireAuth, chatLimiter, async (req, res) => {
   }
 
   try {
-    // Forward the request to the internal FastAPI chatbot
-    // The chatbot service validates our internal CHATBOT_INTERNAL_KEY
+    // Forward the request to the internal FastAPI chatbot.
+    // The chatbot service validates our internal CHATBOT_INTERNAL_KEY.
     const response = await fetch(`${chatbotUrl}/chat`, {
       method: "POST",
       headers: {
-        "Content-Type":     "application/json",
-        "X-Internal-Key":   process.env.CHATBOT_INTERNAL_KEY || "",
-        "X-User-ID":        String(req.user.id),   // pass authenticated user ID
+        "Content-Type":   "application/json",
+        "X-Internal-Key": process.env.CHATBOT_INTERNAL_KEY || "",
+        "X-User-ID":      String(req.user.id), // pass authenticated user ID
       },
       body: JSON.stringify({
         ...parsed.data,
-        user_id: req.user.id,    // server-injected, not user-provided
+        user_id: req.user.id, // server-injected, not user-provided
       }),
-      signal: AbortSignal.timeout(30000),  // 30s timeout for AI responses
+      signal: AbortSignal.timeout(30000), // 30s timeout for AI responses
     });
 
     if (!response.ok) {
@@ -102,7 +115,6 @@ router.post("/chat", requireAuth, chatLimiter, async (req, res) => {
       }
     }
     res.end();
-
   } catch (err) {
     if (err.name === "TimeoutError" || err.name === "AbortError") {
       return res.status(504).json({ message: "Chat response timed out. Please try again." });
