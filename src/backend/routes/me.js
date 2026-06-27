@@ -197,4 +197,120 @@ router.delete("/me", authenticate, async (req, res) => {
   }
 });
 
+
+// ── Candidate profile (student recruiter-visibility) ─────────
+// Students fill this in so recruiters can find and match them.
+// Nothing here is visible to anyone unless is_visible_to_recruiters
+// is true AND the student has explicitly set it.
+
+const candidateProfileSchema = z.object({
+  fullName:             z.string().max(150).trim().optional(),
+  phone:                z.string().max(20).trim().optional(),
+  location:             z.string().max(150).trim().optional(),
+  linkedinUrl:          z.string().url().optional().or(z.literal("")),
+  githubUrl:            z.string().url().optional().or(z.literal("")),
+  portfolioUrl:         z.string().url().optional().or(z.literal("")),
+  yearsOfExperience:    z.string().max(20).trim().optional(),
+  currentRole:          z.string().max(150).trim().optional(),
+  currentCompany:       z.string().max(150).trim().optional(),
+  expectedSalary:       z.string().max(50).trim().optional(),
+  noticePeriod:         z.string().max(50).trim().optional(),
+  skills:               z.array(z.string().max(60).trim()).max(40).optional(),
+  isVisibleToRecruiters: z.boolean().optional(),
+});
+
+router.get("/me/candidate-profile", authenticate, async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT full_name, phone, location, linkedin_url, github_url,
+              portfolio_url, years_of_experience, current_role, current_company,
+              expected_salary, notice_period, skills, is_visible_to_recruiters
+       FROM candidate_profiles WHERE user_id = ?`,
+      [req.userId]
+    );
+    if (rows.length === 0) {
+      // Return an empty profile shape rather than 404 so the frontend
+      // doesn't need to handle both "no row yet" and "row exists" cases.
+      return res.json({ exists: false, isVisibleToRecruiters: false, skills: [] });
+    }
+    const row = rows[0];
+    return res.json({
+      exists: true,
+      fullName:             row.full_name,
+      phone:                row.phone,
+      location:             row.location,
+      linkedinUrl:          row.linkedin_url,
+      githubUrl:            row.github_url,
+      portfolioUrl:         row.portfolio_url,
+      yearsOfExperience:    row.years_of_experience,
+      currentRole:          row.current_role,
+      currentCompany:       row.current_company,
+      expectedSalary:       row.expected_salary,
+      noticePeriod:         row.notice_period,
+      skills: (() => { try { return JSON.parse(row.skills || "[]"); } catch { return []; } })(),
+      isVisibleToRecruiters: !!row.is_visible_to_recruiters,
+    });
+  } catch (err) {
+    console.error("GET /me/candidate-profile:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.patch("/me/candidate-profile", authenticate, async (req, res) => {
+  try {
+    const parsed = candidateProfileSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        message: "Validation failed",
+        errors: parsed.error.flatten().fieldErrors,
+      });
+    }
+    const d = parsed.data;
+
+    // Upsert — creates the row if it doesn't exist yet
+    await db.query(
+      `INSERT INTO candidate_profiles
+         (user_id, full_name, phone, location, linkedin_url, github_url,
+          portfolio_url, years_of_experience, current_role, current_company,
+          expected_salary, notice_period, skills, is_visible_to_recruiters)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         full_name             = COALESCE(?, full_name),
+         phone                 = COALESCE(?, phone),
+         location              = COALESCE(?, location),
+         linkedin_url          = COALESCE(?, linkedin_url),
+         github_url            = COALESCE(?, github_url),
+         portfolio_url         = COALESCE(?, portfolio_url),
+         years_of_experience   = COALESCE(?, years_of_experience),
+         current_role          = COALESCE(?, current_role),
+         current_company       = COALESCE(?, current_company),
+         expected_salary       = COALESCE(?, expected_salary),
+         notice_period         = COALESCE(?, notice_period),
+         skills                = COALESCE(?, skills),
+         is_visible_to_recruiters = COALESCE(?, is_visible_to_recruiters)`,
+      [
+        req.userId,
+        d.fullName ?? null, d.phone ?? null, d.location ?? null,
+        d.linkedinUrl || null, d.githubUrl || null, d.portfolioUrl || null,
+        d.yearsOfExperience ?? null, d.currentRole ?? null, d.currentCompany ?? null,
+        d.expectedSalary ?? null, d.noticePeriod ?? null,
+        d.skills ? JSON.stringify(d.skills) : null,
+        d.isVisibleToRecruiters ?? null,
+        // ON DUPLICATE KEY values (same order)
+        d.fullName ?? null, d.phone ?? null, d.location ?? null,
+        d.linkedinUrl || null, d.githubUrl || null, d.portfolioUrl || null,
+        d.yearsOfExperience ?? null, d.currentRole ?? null, d.currentCompany ?? null,
+        d.expectedSalary ?? null, d.noticePeriod ?? null,
+        d.skills ? JSON.stringify(d.skills) : null,
+        d.isVisibleToRecruiters ?? null,
+      ]
+    );
+    return res.json({ message: "Profile updated" });
+  } catch (err) {
+    console.error("PATCH /me/candidate-profile:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+
 export default router;

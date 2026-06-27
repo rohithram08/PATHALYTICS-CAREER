@@ -19,9 +19,10 @@ import { useAuth } from "@/hooks/useAuth";
 
 interface Props {
   requireVerified?: boolean;
+  adminOnly?: boolean;
 }
 
-const RecruiterGuard = ({ requireVerified = false }: Props) => {
+const RecruiterGuard = ({ requireVerified = false, adminOnly = false }: Props) => {
   const { isAuthenticated, isLoading, isRecruiter, isVerifiedRecruiter, user } = useAuth();
   const location = useLocation();
 
@@ -29,6 +30,12 @@ const RecruiterGuard = ({ requireVerified = false }: Props) => {
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  }
+
+  // Admin check — admins bypass all recruiter checks
+  if (adminOnly) {
+    if (user?.role !== "admin") return <Navigate to="/dashboard" replace />;
+    return <Outlet />;
   }
 
   if (!isRecruiter) {

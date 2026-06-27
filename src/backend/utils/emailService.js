@@ -66,6 +66,27 @@ const TEMPLATES = {
     `,
   }),
 
+  recruiter_verified: ({ name, companyName }) => ({
+    subject: "Your recruiter account has been verified",
+    html: `
+      <p>Hi ${name},</p>
+      <p>Your company <b>${companyName}</b> has been verified on PATHALYTICS.</p>
+      <p>You can now publish job listings and start receiving applications.
+         <a href="${FRONTEND_URL}/recruiter/jobs/new">Post your first job</a>.</p>
+    `,
+  }),
+
+  recruiter_rejected: ({ name, companyName, rejectionReason }) => ({
+    subject: "Action required: Document verification issue",
+    html: `
+      <p>Hi ${name},</p>
+      <p>We were unable to verify the documents submitted for <b>${companyName}</b>.</p>
+      ${rejectionReason ? `<p><b>Reason:</b> ${rejectionReason}</p>` : ""}
+      <p>Please <a href="${FRONTEND_URL}/recruiter/profile">upload a valid document</a>
+         and we will review it again shortly.</p>
+    `,
+  }),
+
   application_withdrawn: ({ candidateName, jobTitle }) => ({
     subject: `${candidateName} withdrew their application`,
     html: `<p>${candidateName} withdrew their application for <b>${jobTitle}</b>.</p>`,
@@ -74,7 +95,7 @@ const TEMPLATES = {
 
 /**
  * @param {keyof typeof TEMPLATES} type
- * @param {{ to: string, userId: number, role: 'user'|'recruiter', applicationId?: number, jobId?: number, [key: string]: any }} context
+ * @param {{ to: string, userId: number, role: 'user'|'recruiter', applicationId?: number, jobId?: number, [key: string]: unknown }} context
  */
 export const sendNotification = async (type, { to, userId, role, applicationId, jobId, ...templateData }) => {
   const build = TEMPLATES[type];

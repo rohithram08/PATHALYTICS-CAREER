@@ -8,7 +8,7 @@ import { ThemeProvider } from "next-themes";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import RecruiterGuard from "@/components/recruiter/RecruiterGuard";
-import RecruiterLayout from "@/components/recruiter/RecruiterLayout"; // ← NEW
+import RecruiterLayout from "@/components/recruiter/RecruiterLayout";
 import LoadingScreen from "@/components/LoadingScreen";
 import { AuthProvider } from "@/contexts/AuthContext";
 import AuthCallback from "./pages/AuthCallback";
@@ -51,14 +51,19 @@ const Settings                    = lazy(() => import("./pages/Settings"));
 const ChangePassword              = lazy(() => import("./pages/ChangePassword"));
 const TwoFactorAuth               = lazy(() => import("./pages/TwoFactorAuth"));
 const OAuthSuccess                = lazy(() => import("./pages/OAuthSuccess"));
+const CandidateProfileSetup       = lazy(() => import("./pages/CandidateProfileSetup"));
 
 // Recruiter pages
 const RecruiterDashboard          = lazy(() => import("./pages/recruiter/RecruiterDashboard"));
 const PostJob                     = lazy(() => import("./pages/recruiter/PostJob"));
 const ManageJobs                  = lazy(() => import("./pages/recruiter/ManageJobs"));
-const ApplicationsReview         = lazy(() => import("./pages/recruiter/ApplicationsReview"));
+const ApplicationsReview          = lazy(() => import("./pages/recruiter/ApplicationsReview"));
 const RecruiterProfileSetup       = lazy(() => import("./pages/recruiter/RecruiterProfileSetup"));
-const EditJob                     = lazy(() => import("./pages/recruiter/EditJob")); // ← NEW
+const EditJob                     = lazy(() => import("./pages/recruiter/EditJob"));
+const CandidatesList              = lazy(() => import("./pages/recruiter/CandidatesList"));
+
+// Admin pages
+const AdminVerifications          = lazy(() => import("./pages/AdminVerifications"));
 
 // ----------------------------------------------------------------------
 // React Query client
@@ -149,6 +154,12 @@ const App = () => (
                     <Route path="/change-password"                element={<ChangePassword />} />
                     <Route path="/two-factor-auth"                element={<TwoFactorAuth />} />
                     <Route path="/career-tips/:id"                element={<CareerTipDetail />} />
+                    <Route path="/career-profile"                 element={<CandidateProfileSetup />} />
+                  </Route>
+
+                  {/* ── Admin routes ── */}
+                  <Route element={<RecruiterGuard adminOnly />}>
+                    <Route path="/admin/verifications"  element={<AdminVerifications />} />
                   </Route>
 
                   {/* ── Recruiter routes ────────────────────────────────────────────
@@ -173,9 +184,10 @@ const App = () => (
                       <Route path="/recruiter/dashboard"                    element={<RecruiterDashboard />} />
                       <Route path="/recruiter/jobs"                         element={<ManageJobs />} />
                       <Route path="/recruiter/jobs/:jobId/applications"     element={<ApplicationsReview />} />
-                      <Route path="/recruiter/jobs/:jobId/edit"             element={<EditJob />} />  {/* ← NEW */}
+                      <Route path="/recruiter/jobs/:jobId/edit"             element={<EditJob />} />
+                      <Route path="/recruiter/candidates"                   element={<CandidatesList />} />
 
-                      {/* Verified recruiters only — inner guard redirects to /recruiter/profile if not verified */}
+                      {/* Verified recruiters only */}
                       <Route element={<RecruiterGuard requireVerified />}>
                         <Route path="/recruiter/jobs/new"                   element={<PostJob />} />
                       </Route>

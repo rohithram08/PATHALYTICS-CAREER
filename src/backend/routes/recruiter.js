@@ -42,9 +42,9 @@ const upload = multer({
 router.get("/profile", async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT id, company_name, company_size, industry, designation,
+      `SELECT id, company_name, company_size, industry, designation, company_domain,
               company_tier, verification_status, created_at
-      FROM recruiter_profiles WHERE user_id = ?`,
+       FROM recruiter_profiles WHERE user_id = ?`,
       [req.user.id]
     );
     if (rows.length === 0) {
@@ -179,6 +179,134 @@ router.get("/documents/:id/download", async (req, res) => {
     return res.download(filePath, rows[0].original_filename);
   } catch (err) {
     console.error("[recruiter:download-document]", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+
+
+// ── Resume download (recruiter downloads a candidate's resume) ─
+// Ownership check: the application must belong to a job owned by
+// this recruiter. The file is served from the private uploads dir
+// — never a public static path.
+router.get("/resumes/:applicationId/download", async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT a.resume_storage_key, u.name AS candidate_name
+       FROM applications a
+       JOIN jobs j ON j.id = a.job_id
+       JOIN users u ON u.id = a.user_id
+       WHERE a.id = ? AND j.recruiter_id = ?`,
+      [req.params.applicationId, req.user.id]
+    );
+    if (rows.length === 0 || !rows[0].resume_storage_key) {
+      return res.status(404).json({ message: "Resume not found" });
+    }
+    const RESUME_DIR = path.join(
+      path.dirname(process.env.UPLOAD_DIR || path.join(process.cwd(), "uploads", "verification-docs")),
+      "resumes"
+    );
+    const filePath = path.join(RESUME_DIR, rows[0].resume_storage_key);
+    const safeName = `${rows[0].candidate_name.replace(/[^a-zA-Z0-9]/g, "_")}_resume.pdf`;
+    return res.download(filePath, safeName);
+  } catch (err) {
+    console.error("[recruiter:resume-download]", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ── Candidate discovery & matching ──────────────────────────
+// Only students who opted in (is_visible_to_recruiters = true)
+// are surfaced here. Recruiters see no PII beyond name, skills,
+// and public profile fields — no email until an application exists.
+
+router.get("/candidates", async (req, res) => {
+  try {
+    const search = req.query.search?.toString().trim() ?? "";
+    const skill  = req.query.skill?.toString().trim() ?? "";
+
+    const conditions = ["cp.is_visible_to_recruiters = TRUE"];
+    const params = [];
+
+    if (search) {
+      conditions.push("(u.name LIKE ? OR cp.current_role LIKE ? OR cp.location LIKE ?)");
+      const like = `%${search}%`;
+      params.push(like, like, like);
+    }
+    if (skill) {
+      // JSON_SEARCH works on TiDB — returns non-null when the skill exists
+      conditions.push("JSON_SEARCH(cp.skills, 'one', ?) IS NOT NULL");
+      params.push(skill);
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+
+    const [rows] = await db.query(
+      `SELECT u.id, u.name,
+              cp.location, cp.current_role, cp.current_company,
+              cp.years_of_experience, cp.skills, cp.linkedin_url,
+              cp.github_url, cp.portfolio_url, cp.notice_period,
+              cp.expected_salary
+       FROM candidate_profiles cp
+       JOIN users u ON u.id = cp.user_id
+       ${where}
+       ORDER BY u.name ASC
+       LIMIT 100`,
+      params
+    );
+
+    return res.json(rows);
+  } catch (err) {
+    console.error("[recruiter:candidates]", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Match candidates against a specific published job.
+// Scoring is keyword-based: each skill in candidate_profiles.skills
+// that appears in the job description adds 1 point. Simple,
+// deterministic, and explainable — no black-box ML needed on day one.
+router.get("/candidates/match/:jobId", async (req, res) => {
+  try {
+    // Ownership check — recruiter can only match against their own jobs
+    const [jobs] = await db.query(
+      "SELECT id, title, description FROM jobs WHERE id = ? AND recruiter_id = ? AND status = 'published'",
+      [req.params.jobId, req.user.id]
+    );
+    if (jobs.length === 0) {
+      return res.status(404).json({ message: "Job not found or not published" });
+    }
+    const jobDesc = jobs[0].description.toLowerCase();
+
+    const [candidates] = await db.query(
+      `SELECT u.id, u.name,
+              cp.location, cp.current_role, cp.current_company,
+              cp.years_of_experience, cp.skills, cp.linkedin_url,
+              cp.github_url, cp.portfolio_url, cp.notice_period,
+              cp.expected_salary
+       FROM candidate_profiles cp
+       JOIN users u ON u.id = cp.user_id
+       WHERE cp.is_visible_to_recruiters = TRUE
+       LIMIT 200`
+    );
+
+    const scored = candidates
+      .map((c) => {
+        const skills = Array.isArray(c.skills)
+          ? c.skills
+          : (() => { try { return JSON.parse(c.skills || "[]"); } catch { return []; } })();
+
+        const matchedSkills = skills.filter((s) =>
+          jobDesc.includes(s.toLowerCase())
+        );
+        return { ...c, skills, matchedSkills, score: matchedSkills.length };
+      })
+      .filter((c) => c.score > 0)
+      .sort((a, b) => b.score - a.score);
+
+    return res.json({ job: jobs[0], candidates: scored });
+  } catch (err) {
+    console.error("[recruiter:candidates-match]", err);
     return res.status(500).json({ message: "Server error" });
   }
 });
