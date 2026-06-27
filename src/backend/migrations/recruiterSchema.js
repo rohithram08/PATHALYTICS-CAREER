@@ -2,59 +2,82 @@
 //
 // Adds the recruiter ecosystem schema on top of the existing PATHALYTICS
 // database (TiDB Cloud Serverless). Every statement checks for existence
-// first, the same pattern as the self-healing checks already in db.js —
-// so this is safe to run more than once and safe to run on a live database.
+// first — safe to run more than once and safe to run on a live database.
 //
-// IMPORTANT — TiDB does not support TRIGGER, stored procedures, or
-// user-defined functions (confirmed against TiDB's own MySQL-compatibility
-// docs, June 2026). Anything that would normally be "auto-synced" by a
-// database trigger — writing an application_status_history row when an
-// application's status changes, logging a notification, recalculating an
-// applicant count — has to happen in the Express route handler instead,
-// wrapped in a transaction alongside the UPDATE. That logic belongs in the
-// Phase 1/2 route files (recruiter.js, applications.js), not here. This
-// file only creates structure, it doesn't write any "sync" logic.
+// ── IMPORTANT: schema ownership ─────────────────────────────────────────
+// db.js runs initSchema() on every server start and ALREADY created these
+// tables with a specific shape:
 //
-// Run once, manually, after reading through it:
+//   recruiter_profiles  — uses verification_status ENUM('pending','approved','rejected')
+//                         and company_tier ENUM('top','mid','startup')
+//   jobs                — recruiter_id FK → recruiter_profiles(id), NOT users(id)
+//   pipeline_stages     — stage_type ENUM includes 'aptitude' (not 'aptitude_test')
+//   applications        — uses status ENUM with stage_1..stage_5 legacy values
+//   application_stage_history — (not application_status_history)
+//   company_verification_documents — already created by db.js
+//
+// This migration therefore:
+//   1. Extends users.role to include 'recruiter' (idempotent ALTER)
+//   2. Adds MISSING COLUMNS to recruiter_profiles that db.js didn't include
+//      (company_domain, verified_at, verified_by)
+//   3. Creates only the tables db.js does NOT create:
+//      candidate_profiles, notification_log
+//   4. Skips tables that db.js already owns.
+//
+// Tables that look like they need a "redesign" (jobs FK target, applications
+// ENUM shape, history table name) are left as-is. Changing live table
+// structure requires a separate ALTER migration with a data-safety plan.
+//
+// IMPORTANT — TiDB does not support TRIGGERs. Status-history writes must
+// happen in Express route handlers inside a transaction.
+//
+// Run once, manually:
 //   npm run db:migrate:recruiter
 //
-// Tables are created in dependency order so foreign keys always resolve:
-//   users (existing)
-//     -> recruiter_profiles
-//          -> company_verification_documents
-//     -> jobs
-//          -> pipeline_stages
-//     -> candidate_profiles
-//     -> applications  (references users, jobs, pipeline_stages)
-//          -> application_status_history
-//     -> notification_log
-
 import mysql from "mysql2/promise";
 import dotenv from "dotenv";
 import { fileURLToPath } from "url";
 
 dotenv.config();
 
+const DB_NAME =
+  process.env.DB_NAME ||
+  process.env.TIDB_DATABASE ||
+  process.env.DATABASE_NAME ||
+  process.env.MYSQL_DATABASE ||
+  "pathalytics";
+
 const db = mysql.createPool({
-  host: process.env.DB_HOST || "localhost",
-  port: parseInt(process.env.DB_PORT || "3306", 10),
-  user: process.env.DB_USER || "root",
-  password: process.env.DB_PASS || process.env.DB_PASSWORD || "",
-  database: process.env.DB_NAME || "pathlytics",
+  host:     process.env.DB_HOST     || process.env.TIDB_HOST     || "localhost",
+  port:     parseInt(process.env.DB_PORT || process.env.TIDB_PORT || "3306", 10),
+  user:     process.env.DB_USER     || process.env.TIDB_USER     || "root",
+  password: process.env.DB_PASS     || process.env.DB_PASSWORD   ||
+            process.env.TIDB_PASSWORD || "",
+  database: DB_NAME,
   waitForConnections: true,
   connectionLimit: 5,
   ssl: { rejectUnauthorized: true },
 });
 
-const DB_NAME = process.env.DB_NAME || "pathlytics";
+console.log("◇ injected env from .env");
+console.log("  → database : " + DB_NAME);
+console.log("  → host     : " + (process.env.DB_HOST || process.env.TIDB_HOST || "localhost"));
 
-// ── Helpers (deliberately self-contained, not imported from db.js, to
-//    avoid a circular import between db.js and this file) ──────────────
+// ── Helpers ──────────────────────────────────────────────────────────────
 const tableExists = async (table) => {
   const [rows] = await db.query(
     `SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?`,
     [DB_NAME, table]
+  );
+  return rows.length > 0;
+};
+
+const columnExists = async (table, column) => {
+  const [rows] = await db.query(
+    `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+    [DB_NAME, table, column]
   );
   return rows.length > 0;
 };
@@ -69,14 +92,29 @@ const createTableIfMissing = async (table, ddl) => {
     await db.query(ddl);
     console.log(`✅ Created ${table}.`);
   } catch (err) {
-    console.error(`❌ Failed to create ${table}:`, err.message);
-    // Stop here rather than continuing — later tables have FKs into
-    // earlier ones, so pressing on after a failure just produces a
-    // confusing cascade of unrelated errors.
+    console.error(`❌ Failed to create ${table}:`, err.message, "\n", err.sql ?? "");
+    // Stop — later tables have FKs into earlier ones.
     throw err;
   }
 };
 
+const addColumnIfMissing = async (table, column, definition) => {
+  const exists = await columnExists(table, column);
+  if (exists) {
+    console.log(`↪︎  ${table}.${column} already exists, skipping.`);
+    return;
+  }
+  try {
+    // Column names that are reserved words must be backticked in ALTER TABLE too
+    await db.query(`ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${definition}`);
+    console.log(`✅ Added ${table}.${column}.`);
+  } catch (err) {
+    console.error(`❌ Failed to add ${table}.${column}:`, err.message);
+    throw err;
+  }
+};
+
+// ── Step 1: Extend users.role ────────────────────────────────────────────
 const extendUserRoleEnum = async () => {
   const [rows] = await db.query(
     `SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS
@@ -90,7 +128,8 @@ const extendUserRoleEnum = async () => {
   }
   try {
     await db.query(
-      `ALTER TABLE users MODIFY COLUMN role ENUM('user','admin','mentor','recruiter') NOT NULL DEFAULT 'user'`
+      `ALTER TABLE users MODIFY COLUMN role
+       ENUM('user','admin','mentor','recruiter') NOT NULL DEFAULT 'user'`
     );
     console.log("✅ Extended users.role to include 'recruiter'.");
   } catch (err) {
@@ -99,92 +138,38 @@ const extendUserRoleEnum = async () => {
   }
 };
 
-// ── Migration ────────────────────────────────────────────────────────
-export const initRecruiterSchema = async () => {
-  console.log("— Recruiter schema migration starting —");
+// ── Step 2: Add missing columns to recruiter_profiles ────────────────────
+// db.js created the table but omitted company_domain, verified_at,
+// verified_by. These are needed by requireVerifiedRecruiter and the
+// admin verification workflow.
+const extendRecruiterProfiles = async () => {
+  if (!(await tableExists("recruiter_profiles"))) {
+    console.log("↪︎  recruiter_profiles not found — db.js hasn't run yet, skipping column extensions.");
+    return;
+  }
 
-  await extendUserRoleEnum();
-
-  await createTableIfMissing(
-    "recruiter_profiles",
-    `CREATE TABLE recruiter_profiles (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      user_id INT NOT NULL UNIQUE,
-      company_name VARCHAR(150) NOT NULL,
-      company_size ENUM('1-10','11-50','51-200','201-500','501-1000','1000+') NOT NULL,
-      industry VARCHAR(100) NOT NULL,
-      designation VARCHAR(100) NOT NULL,
-      company_domain VARCHAR(150) NULL COMMENT 'domain extracted from the work email at signup, e.g. acme.com',
-      company_tier ENUM('top','mid','low') NOT NULL DEFAULT 'low',
-      verification_status ENUM('pending','verified','rejected') NOT NULL DEFAULT 'pending',
-      verified_at DATETIME NULL,
-      verified_by INT NULL COMMENT 'admin user id who approved the verification',
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY (verified_by) REFERENCES users(id) ON DELETE SET NULL,
-      INDEX idx_tier (company_tier),
-      INDEX idx_verification (verification_status)
-    )`
+  // company_domain: extracted from work email at sign-up
+  await addColumnIfMissing(
+    "recruiter_profiles", "company_domain",
+    "VARCHAR(150) NULL COMMENT 'domain from work email, e.g. acme.com' AFTER work_email"
   );
 
-  await createTableIfMissing(
-    "company_verification_documents",
-    `CREATE TABLE company_verification_documents (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      recruiter_profile_id INT NOT NULL,
-      document_type ENUM('incorporation_certificate','gst_certificate','company_pan','other') NOT NULL,
-      storage_key VARCHAR(255) NOT NULL COMMENT 'private storage path/key — never a publicly servable URL',
-      original_filename VARCHAR(255) NOT NULL,
-      uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      review_status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
-      reviewed_by INT NULL,
-      reviewed_at DATETIME NULL,
-      rejection_reason VARCHAR(255) NULL,
-      FOREIGN KEY (recruiter_profile_id) REFERENCES recruiter_profiles(id) ON DELETE CASCADE,
-      FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL,
-      INDEX idx_review_status (review_status)
-    )`
+  // verified_at / verified_by: set by admin when approving the recruiter.
+  // verified_by references users(id) — allow SET NULL if the admin is deleted.
+  await addColumnIfMissing(
+    "recruiter_profiles", "verified_at",
+    "DATETIME NULL AFTER verification_notes"
   );
-
-  await createTableIfMissing(
-    "jobs",
-    `CREATE TABLE jobs (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      recruiter_id INT NOT NULL,
-      title VARCHAR(150) NOT NULL,
-      description TEXT NOT NULL,
-      location VARCHAR(150) NOT NULL,
-      job_type ENUM('full-time','part-time','internship','contract') NOT NULL DEFAULT 'full-time',
-      salary_min INT NULL,
-      salary_max INT NULL,
-      application_mode ENUM('internal','external') NOT NULL DEFAULT 'internal' COMMENT 'internal = Easy Apply on-platform, external = redirect to recruiter ATS/site',
-      external_apply_url VARCHAR(500) NULL,
-      status ENUM('draft','published','closed') NOT NULL DEFAULT 'draft',
-      published_at DATETIME NULL,
-      closed_at DATETIME NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      FOREIGN KEY (recruiter_id) REFERENCES users(id) ON DELETE CASCADE,
-      INDEX idx_status (status),
-      INDEX idx_recruiter (recruiter_id)
-    )`
+  await addColumnIfMissing(
+    "recruiter_profiles", "verified_by",
+    "INT NULL COMMENT 'admin user_id who approved' AFTER verified_at"
   );
+};
 
-  await createTableIfMissing(
-    "pipeline_stages",
-    `CREATE TABLE pipeline_stages (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      job_id INT NOT NULL,
-      stage_order INT NOT NULL COMMENT 'recruiter-defined sequence position — no fixed stage count anywhere',
-      stage_name VARCHAR(100) NOT NULL COMMENT 'recruiter''s own label, e.g. Resume screening, Technical interview',
-      stage_type ENUM('screening','aptitude_test','interview','assignment','offer','custom') NOT NULL DEFAULT 'custom',
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
-      UNIQUE KEY unique_job_stage_order (job_id, stage_order)
-    )`
-  );
-
+// ── Step 3: candidate_profiles ───────────────────────────────────────────
+// `current_role` IS a reserved keyword in TiDB / MySQL — it must be
+// backticked everywhere: in CREATE TABLE, SELECT, INSERT, and UPDATE.
+const createCandidateProfiles = async () => {
   await createTableIfMissing(
     "candidate_profiles",
     `CREATE TABLE candidate_profiles (
@@ -197,69 +182,35 @@ export const initRecruiterSchema = async () => {
       github_url VARCHAR(255) NULL,
       portfolio_url VARCHAR(255) NULL,
       years_of_experience VARCHAR(20) NULL,
-      current_role VARCHAR(150) NULL,
+      \`current_role\` VARCHAR(150) NULL,
       current_company VARCHAR(150) NULL,
       expected_salary VARCHAR(50) NULL,
       notice_period VARCHAR(50) NULL,
       resume_storage_key VARCHAR(255) NULL,
       skills JSON NULL,
-      is_visible_to_recruiters BOOLEAN NOT NULL DEFAULT TRUE COMMENT 'lets a student opt out of recruiter search even while applying to jobs',
+      is_visible_to_recruiters BOOLEAN NOT NULL DEFAULT TRUE
+        COMMENT 'lets a student opt out of recruiter search even while applying to jobs',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )`
   );
+};
 
-  await createTableIfMissing(
-    "applications",
-    `CREATE TABLE applications (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      user_id INT NOT NULL,
-      job_id INT NULL COMMENT 'NULL for external (Adzuna/Greenhouse) applications the user is tracking for their own convenience',
-      external_job_title VARCHAR(150) NULL,
-      external_company VARCHAR(150) NULL,
-      external_url VARCHAR(500) NULL,
-      source ENUM('internal','adzuna','greenhouse') NOT NULL,
-      current_stage_id INT NULL,
-      status ENUM('applied','in-review','interview','offer','rejected','withdrawn') NOT NULL DEFAULT 'applied',
-      resume_storage_key VARCHAR(255) NULL,
-      cover_note TEXT NULL,
-      applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
-      FOREIGN KEY (current_stage_id) REFERENCES pipeline_stages(id) ON DELETE SET NULL,
-      UNIQUE KEY unique_user_internal_job (user_id, job_id),
-      INDEX idx_job_status (job_id, status),
-      INDEX idx_user (user_id)
-    )`
-  );
-
-  await createTableIfMissing(
-    "application_status_history",
-    `CREATE TABLE application_status_history (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      application_id INT NOT NULL,
-      from_status VARCHAR(50) NULL,
-      to_status VARCHAR(50) NOT NULL,
-      from_stage_id INT NULL,
-      to_stage_id INT NULL,
-      changed_by INT NOT NULL COMMENT 'recruiter user id who made the change',
-      note VARCHAR(255) NULL,
-      changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (application_id) REFERENCES applications(id) ON DELETE CASCADE,
-      FOREIGN KEY (changed_by) REFERENCES users(id) ON DELETE CASCADE,
-      INDEX idx_application (application_id)
-    )`
-  );
-
+// ── Step 4: notification_log ─────────────────────────────────────────────
+// db.js created email_notifications (a send-queue table). notification_log
+// is a separate per-user inbox/audit log — a different concept.
+// NOTE: db.js jobs FK is recruiter_profiles(id), so related_job_id here
+// intentionally references jobs(id) directly.
+const createNotificationLog = async () => {
   await createTableIfMissing(
     "notification_log",
     `CREATE TABLE notification_log (
       id INT AUTO_INCREMENT PRIMARY KEY,
       recipient_user_id INT NOT NULL,
       recipient_role ENUM('user','recruiter') NOT NULL,
-      notification_type VARCHAR(50) NOT NULL COMMENT 'e.g. application_status_changed, recruiter_welcome, document_verified',
+      notification_type VARCHAR(50) NOT NULL
+        COMMENT 'e.g. application_status_changed, recruiter_welcome, document_verified',
       related_application_id INT NULL,
       related_job_id INT NULL,
       subject VARCHAR(255) NOT NULL,
@@ -272,11 +223,35 @@ export const initRecruiterSchema = async () => {
       INDEX idx_recipient (recipient_user_id)
     )`
   );
+};
+
+// ── Main ─────────────────────────────────────────────────────────────────
+export const initRecruiterSchema = async () => {
+  console.log("— Recruiter schema migration starting —");
+
+  await extendUserRoleEnum();
+  await extendRecruiterProfiles();
+  await createCandidateProfiles();
+  await createNotificationLog();
+
+  // Tables already managed by db.js — log that we're intentionally skipping:
+  for (const t of [
+    "recruiter_profiles",
+    "company_verification_documents",
+    "jobs",
+    "pipeline_stages",
+    "applications",
+    "application_stage_history",
+    "email_notifications",
+  ]) {
+    if (await tableExists(t)) {
+      console.log(`↪︎  ${t} owned by db.js — skipping.`);
+    }
+  }
 
   console.log("— Recruiter schema migration complete —");
 };
 
-// Allow running directly: node src/backend/migrations/recruiterSchema.js
 const isMain =
   process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 

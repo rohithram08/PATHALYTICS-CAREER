@@ -7,6 +7,8 @@ import db from "../db.js";
 const router = express.Router();
 
 // ── Auth middleware ──────────────────────────────────────────
+// Local alias kept so existing callers of this file still work.
+// The canonical version (with cookie support) lives in middleware/auth.js.
 export const authenticate = (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) {
@@ -204,26 +206,28 @@ router.delete("/me", authenticate, async (req, res) => {
 // is true AND the student has explicitly set it.
 
 const candidateProfileSchema = z.object({
-  fullName:             z.string().max(150).trim().optional(),
-  phone:                z.string().max(20).trim().optional(),
-  location:             z.string().max(150).trim().optional(),
-  linkedinUrl:          z.string().url().optional().or(z.literal("")),
-  githubUrl:            z.string().url().optional().or(z.literal("")),
-  portfolioUrl:         z.string().url().optional().or(z.literal("")),
-  yearsOfExperience:    z.string().max(20).trim().optional(),
-  currentRole:          z.string().max(150).trim().optional(),
-  currentCompany:       z.string().max(150).trim().optional(),
-  expectedSalary:       z.string().max(50).trim().optional(),
-  noticePeriod:         z.string().max(50).trim().optional(),
-  skills:               z.array(z.string().max(60).trim()).max(40).optional(),
+  fullName:              z.string().max(150).trim().optional(),
+  phone:                 z.string().max(20).trim().optional(),
+  location:              z.string().max(150).trim().optional(),
+  linkedinUrl:           z.string().url().optional().or(z.literal("")),
+  githubUrl:             z.string().url().optional().or(z.literal("")),
+  portfolioUrl:          z.string().url().optional().or(z.literal("")),
+  yearsOfExperience:     z.string().max(20).trim().optional(),
+  currentRole:           z.string().max(150).trim().optional(),
+  currentCompany:        z.string().max(150).trim().optional(),
+  expectedSalary:        z.string().max(50).trim().optional(),
+  noticePeriod:          z.string().max(50).trim().optional(),
+  skills:                z.array(z.string().max(60).trim()).max(40).optional(),
   isVisibleToRecruiters: z.boolean().optional(),
 });
 
 router.get("/me/candidate-profile", authenticate, async (req, res) => {
   try {
     const [rows] = await db.query(
+      // `current_role` is a reserved word in TiDB/MySQL — must be backticked
+      // in every SELECT, INSERT, and UPDATE that references this column.
       `SELECT full_name, phone, location, linkedin_url, github_url,
-              portfolio_url, years_of_experience, current_role, current_company,
+              portfolio_url, years_of_experience, \`current_role\`, current_company,
               expected_salary, notice_period, skills, is_visible_to_recruiters
        FROM candidate_profiles WHERE user_id = ?`,
       [req.userId]
@@ -235,18 +239,18 @@ router.get("/me/candidate-profile", authenticate, async (req, res) => {
     }
     const row = rows[0];
     return res.json({
-      exists: true,
-      fullName:             row.full_name,
-      phone:                row.phone,
-      location:             row.location,
-      linkedinUrl:          row.linkedin_url,
-      githubUrl:            row.github_url,
-      portfolioUrl:         row.portfolio_url,
-      yearsOfExperience:    row.years_of_experience,
-      currentRole:          row.current_role,
-      currentCompany:       row.current_company,
-      expectedSalary:       row.expected_salary,
-      noticePeriod:         row.notice_period,
+      exists:                true,
+      fullName:              row.full_name,
+      phone:                 row.phone,
+      location:              row.location,
+      linkedinUrl:           row.linkedin_url,
+      githubUrl:             row.github_url,
+      portfolioUrl:          row.portfolio_url,
+      yearsOfExperience:     row.years_of_experience,
+      currentRole:           row.current_role,
+      currentCompany:        row.current_company,
+      expectedSalary:        row.expected_salary,
+      noticePeriod:          row.notice_period,
       skills: (() => { try { return JSON.parse(row.skills || "[]"); } catch { return []; } })(),
       isVisibleToRecruiters: !!row.is_visible_to_recruiters,
     });
@@ -267,26 +271,28 @@ router.patch("/me/candidate-profile", authenticate, async (req, res) => {
     }
     const d = parsed.data;
 
-    // Upsert — creates the row if it doesn't exist yet
+    // Upsert — creates the row if it doesn't exist yet.
+    // `current_role` is backticked in the INSERT column list and in both
+    // sides of the ON DUPLICATE KEY UPDATE assignment — reserved word.
     await db.query(
       `INSERT INTO candidate_profiles
          (user_id, full_name, phone, location, linkedin_url, github_url,
-          portfolio_url, years_of_experience, current_role, current_company,
+          portfolio_url, years_of_experience, \`current_role\`, current_company,
           expected_salary, notice_period, skills, is_visible_to_recruiters)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
-         full_name             = COALESCE(?, full_name),
-         phone                 = COALESCE(?, phone),
-         location              = COALESCE(?, location),
-         linkedin_url          = COALESCE(?, linkedin_url),
-         github_url            = COALESCE(?, github_url),
-         portfolio_url         = COALESCE(?, portfolio_url),
-         years_of_experience   = COALESCE(?, years_of_experience),
-         current_role          = COALESCE(?, current_role),
-         current_company       = COALESCE(?, current_company),
-         expected_salary       = COALESCE(?, expected_salary),
-         notice_period         = COALESCE(?, notice_period),
-         skills                = COALESCE(?, skills),
+         full_name               = COALESCE(?, full_name),
+         phone                   = COALESCE(?, phone),
+         location                = COALESCE(?, location),
+         linkedin_url            = COALESCE(?, linkedin_url),
+         github_url              = COALESCE(?, github_url),
+         portfolio_url           = COALESCE(?, portfolio_url),
+         years_of_experience     = COALESCE(?, years_of_experience),
+         \`current_role\`        = COALESCE(?, \`current_role\`),
+         current_company         = COALESCE(?, current_company),
+         expected_salary         = COALESCE(?, expected_salary),
+         notice_period           = COALESCE(?, notice_period),
+         skills                  = COALESCE(?, skills),
          is_visible_to_recruiters = COALESCE(?, is_visible_to_recruiters)`,
       [
         req.userId,
@@ -296,7 +302,7 @@ router.patch("/me/candidate-profile", authenticate, async (req, res) => {
         d.expectedSalary ?? null, d.noticePeriod ?? null,
         d.skills ? JSON.stringify(d.skills) : null,
         d.isVisibleToRecruiters ?? null,
-        // ON DUPLICATE KEY values (same order)
+        // ON DUPLICATE KEY values (same order as UPDATE clause above)
         d.fullName ?? null, d.phone ?? null, d.location ?? null,
         d.linkedinUrl || null, d.githubUrl || null, d.portfolioUrl || null,
         d.yearsOfExperience ?? null, d.currentRole ?? null, d.currentCompany ?? null,
