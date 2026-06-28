@@ -13,7 +13,7 @@ import ProtectedRoute         from "@/components/ProtectedRoute";
 import RecruiterGuard         from "@/components/recruiter/RecruiterGuard";
 import RecruiterLayout        from "@/components/recruiter/RecruiterLayout";
 import LoadingScreen          from "@/components/LoadingScreen";
-import { AuthProvider }       from "@/contexts/AuthContext";
+import { AuthProvider }       from "@/hooks/useAuth";
 import { GuestGuard }         from "@/components/guards/Guards";          // ← Doc 2
 
 // ── Non-lazy (tiny / always-needed / outside Suspense context) ────────────────
