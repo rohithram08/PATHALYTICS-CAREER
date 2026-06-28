@@ -1,8 +1,4 @@
 // src/hooks/useAuth.ts
-// ─────────────────────────────────────────────────────────────
-// Drop this file in as a complete replacement.
-// Select All (Ctrl+A) in VS Code → Delete → Paste.
-// ─────────────────────────────────────────────────────────────
 
 import React, {
   createContext,
@@ -23,6 +19,7 @@ export interface AuthUser {
   avatar_url?: string;
   bio?: string;
   email_verified?: number;
+  verification_status?: "pending" | "verified" | "rejected"; // ← needed for isVerifiedRecruiter
 }
 
 interface AuthContextType {
@@ -31,6 +28,7 @@ interface AuthContextType {
   loading: boolean;
   isAuthenticated: boolean;
   isRecruiter: boolean;
+  isVerifiedRecruiter: boolean; // ← added
   isAdmin: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -38,7 +36,7 @@ interface AuthContextType {
   setUser: React.Dispatch<React.SetStateAction<AuthUser | null>>;
 }
 
-// ── Context — defined right here, not imported from elsewhere ─
+// ── Context ───────────────────────────────────────────────────
 const AuthContext = createContext<AuthContextType | null>(null);
 
 // ── Provider ──────────────────────────────────────────────────
@@ -100,10 +98,12 @@ export function AuthProvider({
     }
   }, []);
 
-  const isAuthenticated: boolean = !isLoading && user !== null;
-  const isRecruiter: boolean =
-    user?.role === "recruiter" || user?.role === "admin";
-  const isAdmin: boolean = user?.role === "admin";
+  const isAuthenticated: boolean     = !isLoading && user !== null;
+  const isRecruiter: boolean         = user?.role === "recruiter" || user?.role === "admin";
+  const isAdmin: boolean             = user?.role === "admin";
+  // Admins are always considered verified; recruiters need verification_status === "verified"
+  const isVerifiedRecruiter: boolean = user?.role === "admin" ||
+    (user?.role === "recruiter" && user?.verification_status === "verified");
 
   const value: AuthContextType = {
     user,
@@ -111,6 +111,7 @@ export function AuthProvider({
     loading: isLoading,
     isAuthenticated,
     isRecruiter,
+    isVerifiedRecruiter, // ← exposed
     isAdmin,
     login,
     logout,
@@ -118,19 +119,13 @@ export function AuthProvider({
     setUser,
   };
 
-  return React.createElement(
-    AuthContext.Provider,
-    { value },
-    children
-  );
+  return React.createElement(AuthContext.Provider, { value }, children);
 }
 
 // ── Hook ──────────────────────────────────────────────────────
 export function useAuth(): AuthContextType {
   const ctx = useContext(AuthContext);
-  if (!ctx) {
-    throw new Error("useAuth() must be called inside <AuthProvider>");
-  }
+  if (!ctx) throw new Error("useAuth() must be called inside <AuthProvider>");
   return ctx;
 }
 

@@ -147,6 +147,8 @@ app.get("/api/health", (_req, res) =>
 );
 
 // ── 9. API Routes ────────────────────────────────────────────
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use("/api/auth",        authRoutes);
 app.use("/api/auth",        meRoutes);
 app.use("/api/auth",        oauthRoutes);
