@@ -150,7 +150,7 @@ app.get("/api/health", (_req, res) =>
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use("/api/auth",        authRoutes);
-app.use("/api/auth",        meRoutes);
+app.use("/api/user",        meRoutes);  
 app.use("/api/auth",        oauthRoutes);
 app.use("/api/auth",        passwordRoutes);
 app.use("/api/jobs",        jobsRoutes);
