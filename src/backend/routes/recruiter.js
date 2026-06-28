@@ -1,312 +1,581 @@
 // src/backend/routes/recruiter.js
+// ─────────────────────────────────────────────────────────────
+// Recruiter dashboard API
+//
+// All routes require: requireAuth + requireRecruiter
+//
+// Endpoints:
+//   GET  /api/recruiter/dashboard     — KPI snapshot
+//   GET  /api/recruiter/profile       — recruiter profile
+//   PUT  /api/recruiter/profile       — update profile
+//   GET  /api/recruiter/jobs          — list job postings
+//   POST /api/recruiter/jobs          — create job posting
+//   PUT  /api/recruiter/jobs/:id      — update posting
+//   DELETE /api/recruiter/jobs/:id    — delete posting
+//   GET  /api/recruiter/candidates    — candidate pool (with filters)
+//   GET  /api/recruiter/candidates/:id — candidate detail
+//   POST /api/recruiter/candidates/:id/status — update pipeline stage
+//   GET  /api/recruiter/analytics     — funnel + trend data
+//   GET  /api/recruiter/messages      — inbox
+//   POST /api/recruiter/messages      — send message to candidate
+//   GET  /api/recruiter/talent-pool   — saved/bookmarked profiles
+//   POST /api/recruiter/talent-pool/:userId — bookmark user
+//   DELETE /api/recruiter/talent-pool/:userId — remove bookmark
+// ─────────────────────────────────────────────────────────────
+
 import express from "express";
-import multer from "multer";
-import { randomUUID } from "crypto";
-import path from "path";
-import fs from "fs";
 import { z } from "zod";
 import db from "../db.js";
-import { requireAuth, requireRole } from "../middleware/auth.js";
+import { requireAuth, requireRecruiter } from "../middleware/auth.js";
+import { upload, validateUploadedFile, cleanupUpload } from "../middleware/upload.js";
+import { uploadLimiter } from "../middleware/security.js";
 
 const router = express.Router();
+router.use(requireAuth, requireRecruiter);
 
-// Every route below requires a logged-in recruiter.
-router.use(requireAuth, requireRole("recruiter"));
-
-// ── Document storage ────────────────────────────────────────────────
-// Private directory, never served via express.static. Files are only
-// ever reachable through the authenticated /documents/:id/download
-// route below, which checks ownership before reading anything off disk.
-const UPLOAD_DIR =
-  process.env.UPLOAD_DIR || path.join(process.cwd(), "uploads", "verification-docs");
-fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-
-const upload = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
-    filename: (_req, file, cb) => {
-      // Random name on disk, not the original filename — an enumerated
-      // or guessed path is useless without a matching DB row to authorize it.
-      const ext = path.extname(file.originalname).slice(0, 10);
-      cb(null, `${randomUUID()}${ext}`);
-    },
-  }),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
-  fileFilter: (_req, file, cb) => {
-    const allowed = ["application/pdf", "image/jpeg", "image/png"];
-    cb(null, allowed.includes(file.mimetype));
-  },
+// ── Schemas ───────────────────────────────────────────────────
+const jobSchema = z.object({
+  title: z.string().min(3).max(200),
+  description: z.string().min(20).max(10000),
+  location: z.string().max(200).optional(),
+  salary_min: z.number().int().positive().optional(),
+  salary_max: z.number().int().positive().optional(),
+  employment_type: z.enum(["full-time", "part-time", "contract", "internship", "remote"]).optional(),
+  experience_level: z.enum(["entry", "mid", "senior", "lead", "director"]).optional(),
+  skills: z.array(z.string().max(60)).max(20).optional(),
+  deadline: z.string().datetime().optional(),
+  is_active: z.boolean().default(true),
 });
 
-// ── Profile ──────────────────────────────────────────────────────────
+const candidateStatusSchema = z.object({
+  stage: z.enum(["applied", "screening", "interview", "offer", "hired", "rejected"]),
+  notes: z.string().max(2000).optional(),
+});
+
+const messageSchema = z.object({
+  recipient_id: z.number().int().positive(),
+  subject: z.string().min(1).max(200),
+  body: z.string().min(1).max(5000),
+});
+
+// ── Helpers ───────────────────────────────────────────────────
+async function getRecruiterProfile(userId) {
+  const [rows] = await db.query(
+    "SELECT * FROM recruiter_profiles WHERE user_id = ?",
+    [userId]
+  );
+  return rows[0] || null;
+}
+
+// ── GET /dashboard ────────────────────────────────────────────
+router.get("/dashboard", async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const [[profileRow]] = await db.query(
+      "SELECT id FROM recruiter_profiles WHERE user_id = ?",
+      [userId]
+    );
+    if (!profileRow) {
+      return res.status(404).json({ message: "Recruiter profile not found" });
+    }
+    const recruiterId = profileRow.id;
+
+    const [[jobStats]] = await db.query(
+      `SELECT
+         COUNT(*) AS total_jobs,
+         SUM(is_active = 1) AS active_jobs,
+         SUM(is_active = 0) AS closed_jobs
+       FROM job_postings WHERE recruiter_id = ?`,
+      [recruiterId]
+    );
+
+    const [[appStats]] = await db.query(
+      `SELECT
+         COUNT(*) AS total_applications,
+         SUM(stage = 'screening') AS screening,
+         SUM(stage = 'interview') AS interviews,
+         SUM(stage = 'offer') AS offers,
+         SUM(stage = 'hired') AS hired,
+         SUM(stage = 'rejected') AS rejected
+       FROM applications a
+       JOIN job_postings jp ON a.job_id = jp.id
+       WHERE jp.recruiter_id = ?`,
+      [recruiterId]
+    );
+
+    const [[viewStats]] = await db.query(
+      `SELECT COALESCE(SUM(views),0) AS total_views
+       FROM job_postings WHERE recruiter_id = ?`,
+      [recruiterId]
+    );
+
+    // 30-day trend
+    const [trend] = await db.query(
+      `SELECT DATE(a.created_at) AS day, COUNT(*) AS count
+       FROM applications a
+       JOIN job_postings jp ON a.job_id = jp.id
+       WHERE jp.recruiter_id = ? AND a.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+       GROUP BY DATE(a.created_at)
+       ORDER BY day ASC`,
+      [recruiterId]
+    );
+
+    // Recent applications
+    const [recent] = await db.query(
+      `SELECT a.id, a.stage, a.created_at,
+              u.name AS candidate_name, u.email AS candidate_email,
+              jp.title AS job_title
+       FROM applications a
+       JOIN users u ON a.user_id = u.id
+       JOIN job_postings jp ON a.job_id = jp.id
+       WHERE jp.recruiter_id = ?
+       ORDER BY a.created_at DESC LIMIT 10`,
+      [recruiterId]
+    );
+
+    return res.json({
+      jobs: jobStats,
+      applications: appStats,
+      views: viewStats,
+      trend,
+      recent_applications: recent,
+    });
+  } catch (err) {
+    console.error("[recruiter/dashboard]", err);
+    return res.status(500).json({ message: "Failed to load dashboard" });
+  }
+});
+
+// ── GET /profile ──────────────────────────────────────────────
 router.get("/profile", async (req, res) => {
   try {
-    const [rows] = await db.query(
-      `SELECT id, company_name, company_size, industry, designation, company_domain,
-              company_tier, verification_status, created_at
-       FROM recruiter_profiles WHERE user_id = ?`,
-      [req.user.id]
-    );
-    if (rows.length === 0) {
-      return res.status(404).json({ message: "Recruiter profile not found" });
-    }
-    return res.json(rows[0]);
+    const profile = await getRecruiterProfile(req.user.id);
+    if (!profile) return res.status(404).json({ message: "Profile not found" });
+    return res.json(profile);
   } catch (err) {
-    console.error("[recruiter:get-profile]", err);
+    console.error("[recruiter/profile GET]", err);
     return res.status(500).json({ message: "Server error" });
   }
 });
 
-const profileUpdateSchema = z.object({
-  companyName: z.string().min(2).max(150).trim().optional(),
-  companySize: z.enum(["1-10", "11-50", "51-200", "201-500", "501-1000", "1000+"]).optional(),
-  industry: z.string().min(2).max(100).trim().optional(),
-  designation: z.string().min(2).max(100).trim().optional(),
-});
-
-router.patch("/profile", async (req, res) => {
+// ── PUT /profile ──────────────────────────────────────────────
+router.put("/profile", async (req, res) => {
   try {
-    const parsed = profileUpdateSchema.safeParse(req.body);
+    const schema = z.object({
+      company_name: z.string().min(1).max(255).optional(),
+      company_size: z.enum(["1-10","11-50","51-200","201-500","501-1000","1000+"]).optional(),
+      industry: z.string().max(100).optional(),
+      company_website: z.string().url().max(500).optional().nullable(),
+      designation: z.string().max(200).optional(),
+      bio: z.string().max(2000).optional(),
+      linkedin_url: z.string().url().max(500).optional().nullable(),
+    });
+
+    const parsed = schema.safeParse(req.body);
     if (!parsed.success) {
-      return res
-        .status(400)
-        .json({ message: "Validation failed", errors: parsed.error.flatten().fieldErrors });
-    }
-
-    // company_tier and verification_status are deliberately not editable
-    // here — those are system/admin controlled, not self-service fields.
-    const columns = {
-      companyName: "company_name",
-      companySize: "company_size",
-      industry: "industry",
-      designation: "designation",
-    };
-    const sets = [];
-    const values = [];
-    for (const [key, col] of Object.entries(columns)) {
-      if (parsed.data[key] !== undefined) {
-        sets.push(`${col} = ?`);
-        values.push(parsed.data[key]);
-      }
-    }
-    if (sets.length === 0) {
-      return res.status(400).json({ message: "No fields to update" });
-    }
-    values.push(req.user.id);
-
-    await db.query(`UPDATE recruiter_profiles SET ${sets.join(", ")} WHERE user_id = ?`, values);
-    return res.json({ message: "Profile updated" });
-  } catch (err) {
-    console.error("[recruiter:update-profile]", err);
-    return res.status(500).json({ message: "Server error" });
-  }
-});
-
-// ── Verification documents (low-tier / no corporate domain) ─────────
-router.post("/documents", upload.single("document"), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res
-        .status(400)
-        .json({ message: "No file uploaded, or file type not allowed (PDF/JPEG/PNG only)" });
-    }
-
-    const documentType = z
-      .enum(["incorporation_certificate", "gst_certificate", "company_pan", "other"])
-      .safeParse(req.body.documentType);
-    if (!documentType.success) {
-      fs.unlink(req.file.path, () => {});
-      return res.status(400).json({ message: "Invalid document type" });
-    }
-
-    const [profile] = await db.query("SELECT id FROM recruiter_profiles WHERE user_id = ?", [
-      req.user.id,
-    ]);
-    if (profile.length === 0) {
-      fs.unlink(req.file.path, () => {});
-      return res.status(404).json({ message: "Recruiter profile not found" });
+      return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten().fieldErrors });
     }
 
     await db.query(
-      `INSERT INTO company_verification_documents
-         (recruiter_profile_id, document_type, storage_key, original_filename)
-       VALUES (?, ?, ?, ?)`,
-      [profile[0].id, documentType.data, req.file.filename, req.file.originalname]
+      `UPDATE recruiter_profiles SET ? WHERE user_id = ?`,
+      [{ ...parsed.data, updated_at: new Date() }, req.user.id]
     );
 
-    return res.status(201).json({ message: "Document uploaded, pending review" });
+    const profile = await getRecruiterProfile(req.user.id);
+    return res.json({ message: "Profile updated", profile });
   } catch (err) {
-    console.error("[recruiter:upload-document]", err);
+    console.error("[recruiter/profile PUT]", err);
     return res.status(500).json({ message: "Server error" });
   }
 });
 
-router.get("/documents", async (req, res) => {
+// ── GET /jobs ─────────────────────────────────────────────────
+router.get("/jobs", async (req, res) => {
   try {
-    const [rows] = await db.query(
-      `SELECT d.id, d.document_type, d.original_filename, d.review_status,
-              d.rejection_reason, d.uploaded_at, d.reviewed_at
-       FROM company_verification_documents d
-       JOIN recruiter_profiles rp ON rp.id = d.recruiter_profile_id
-       WHERE rp.user_id = ?
-       ORDER BY d.uploaded_at DESC`,
+    const { page = 1, limit = 20, active } = req.query;
+    const offset = (Number(page) - 1) * Number(limit);
+
+    const [[{ id: recruiterId }]] = await db.query(
+      "SELECT id FROM recruiter_profiles WHERE user_id = ?",
       [req.user.id]
     );
-    return res.json(rows);
-  } catch (err) {
-    console.error("[recruiter:list-documents]", err);
-    return res.status(500).json({ message: "Server error" });
-  }
-});
 
-// Authenticated download — ownership is checked against the logged-in
-// recruiter before the file is read off disk. This replaces the "wire up
-// static serving" step from the original plan, which would have made
-// every uploaded document guessable/enumerable by anyone.
-router.get("/documents/:id/download", async (req, res) => {
-  try {
-    const [rows] = await db.query(
-      `SELECT d.storage_key, d.original_filename
-       FROM company_verification_documents d
-       JOIN recruiter_profiles rp ON rp.id = d.recruiter_profile_id
-       WHERE d.id = ? AND rp.user_id = ?`,
-      [req.params.id, req.user.id]
-    );
-    if (rows.length === 0) {
-      return res.status(404).json({ message: "Document not found" });
-    }
-    const filePath = path.join(UPLOAD_DIR, rows[0].storage_key);
-    return res.download(filePath, rows[0].original_filename);
-  } catch (err) {
-    console.error("[recruiter:download-document]", err);
-    return res.status(500).json({ message: "Server error" });
-  }
-});
+    let where = "WHERE jp.recruiter_id = ?";
+    const params = [recruiterId];
 
+    if (active === "true") { where += " AND jp.is_active = 1"; }
+    else if (active === "false") { where += " AND jp.is_active = 0"; }
 
-
-// ── Resume download (recruiter downloads a candidate's resume) ─
-// Ownership check: the application must belong to a job owned by
-// this recruiter. The file is served from the private uploads dir
-// — never a public static path.
-router.get("/resumes/:applicationId/download", async (req, res) => {
-  try {
-    const [rows] = await db.query(
-      `SELECT a.resume_storage_key, u.name AS candidate_name
-       FROM applications a
-       JOIN jobs j ON j.id = a.job_id
-       JOIN users u ON u.id = a.user_id
-       WHERE a.id = ? AND j.recruiter_id = ?`,
-      [req.params.applicationId, req.user.id]
-    );
-    if (rows.length === 0 || !rows[0].resume_storage_key) {
-      return res.status(404).json({ message: "Resume not found" });
-    }
-    const RESUME_DIR = path.join(
-      path.dirname(process.env.UPLOAD_DIR || path.join(process.cwd(), "uploads", "verification-docs")),
-      "resumes"
-    );
-    const filePath = path.join(RESUME_DIR, rows[0].resume_storage_key);
-    const safeName = `${rows[0].candidate_name.replace(/[^a-zA-Z0-9]/g, "_")}_resume.pdf`;
-    return res.download(filePath, safeName);
-  } catch (err) {
-    console.error("[recruiter:resume-download]", err);
-    return res.status(500).json({ message: "Server error" });
-  }
-});
-
-// ── Candidate discovery & matching ──────────────────────────
-// Only students who opted in (is_visible_to_recruiters = true)
-// are surfaced here. Recruiters see no PII beyond name, skills,
-// and public profile fields — no email until an application exists.
-
-router.get("/candidates", async (req, res) => {
-  try {
-    const search = req.query.search?.toString().trim() ?? "";
-    const skill  = req.query.skill?.toString().trim() ?? "";
-
-    const conditions = ["cp.is_visible_to_recruiters = TRUE"];
-    const params = [];
-
-    if (search) {
-      conditions.push("(u.name LIKE ? OR cp.current_role LIKE ? OR cp.location LIKE ?)");
-      const like = `%${search}%`;
-      params.push(like, like, like);
-    }
-    if (skill) {
-      // JSON_SEARCH works on TiDB — returns non-null when the skill exists
-      conditions.push("JSON_SEARCH(cp.skills, 'one', ?) IS NOT NULL");
-      params.push(skill);
-    }
-
-    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-
-    const [rows] = await db.query(
-      `SELECT u.id, u.name,
-              cp.location, cp.current_role, cp.current_company,
-              cp.years_of_experience, cp.skills, cp.linkedin_url,
-              cp.github_url, cp.portfolio_url, cp.notice_period,
-              cp.expected_salary
-       FROM candidate_profiles cp
-       JOIN users u ON u.id = cp.user_id
-       ${where}
-       ORDER BY u.name ASC
-       LIMIT 100`,
+    const [[{ total }]] = await db.query(
+      `SELECT COUNT(*) AS total FROM job_postings jp ${where}`,
       params
     );
 
-    return res.json(rows);
+    const [jobs] = await db.query(
+      `SELECT jp.*,
+              COUNT(DISTINCT a.id) AS application_count,
+              COUNT(DISTINCT CASE WHEN a.stage = 'hired' THEN a.id END) AS hired_count
+       FROM job_postings jp
+       LEFT JOIN applications a ON a.job_id = jp.id
+       ${where}
+       GROUP BY jp.id
+       ORDER BY jp.created_at DESC
+       LIMIT ? OFFSET ?`,
+      [...params, Number(limit), offset]
+    );
+
+    return res.json({ jobs, total, page: Number(page), limit: Number(limit) });
   } catch (err) {
-    console.error("[recruiter:candidates]", err);
+    console.error("[recruiter/jobs GET]", err);
     return res.status(500).json({ message: "Server error" });
   }
 });
 
-// Match candidates against a specific published job.
-// Scoring is keyword-based: each skill in candidate_profiles.skills
-// that appears in the job description adds 1 point. Simple,
-// deterministic, and explainable — no black-box ML needed on day one.
-router.get("/candidates/match/:jobId", async (req, res) => {
+// ── POST /jobs ────────────────────────────────────────────────
+router.post("/jobs", async (req, res) => {
   try {
-    // Ownership check — recruiter can only match against their own jobs
-    const [jobs] = await db.query(
-      "SELECT id, title, description FROM jobs WHERE id = ? AND recruiter_id = ? AND status = 'published'",
-      [req.params.jobId, req.user.id]
-    );
-    if (jobs.length === 0) {
-      return res.status(404).json({ message: "Job not found or not published" });
+    const parsed = jobSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten().fieldErrors });
     }
-    const jobDesc = jobs[0].description.toLowerCase();
+
+    const [[{ id: recruiterId }]] = await db.query(
+      "SELECT id FROM recruiter_profiles WHERE user_id = ?",
+      [req.user.id]
+    );
+
+    const data = parsed.data;
+    const [result] = await db.query(
+      `INSERT INTO job_postings
+         (recruiter_id, title, description, location, salary_min, salary_max,
+          employment_type, experience_level, skills, deadline, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        recruiterId, data.title, data.description, data.location || null,
+        data.salary_min || null, data.salary_max || null,
+        data.employment_type || null, data.experience_level || null,
+        JSON.stringify(data.skills || []),
+        data.deadline || null, data.is_active,
+      ]
+    );
+
+    return res.status(201).json({ message: "Job posted", id: result.insertId });
+  } catch (err) {
+    console.error("[recruiter/jobs POST]", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ── PUT /jobs/:id ─────────────────────────────────────────────
+router.put("/jobs/:id", async (req, res) => {
+  try {
+    const [[{ id: recruiterId }]] = await db.query(
+      "SELECT id FROM recruiter_profiles WHERE user_id = ?",
+      [req.user.id]
+    );
+
+    const [existing] = await db.query(
+      "SELECT id FROM job_postings WHERE id = ? AND recruiter_id = ?",
+      [req.params.id, recruiterId]
+    );
+    if (!existing.length) return res.status(404).json({ message: "Job not found" });
+
+    const parsed = jobSchema.partial().safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten().fieldErrors });
+    }
+
+    await db.query(
+      "UPDATE job_postings SET ? WHERE id = ?",
+      [{ ...parsed.data, updated_at: new Date() }, req.params.id]
+    );
+
+    return res.json({ message: "Job updated" });
+  } catch (err) {
+    console.error("[recruiter/jobs PUT]", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ── DELETE /jobs/:id ──────────────────────────────────────────
+router.delete("/jobs/:id", async (req, res) => {
+  try {
+    const [[{ id: recruiterId }]] = await db.query(
+      "SELECT id FROM recruiter_profiles WHERE user_id = ?",
+      [req.user.id]
+    );
+
+    const [result] = await db.query(
+      "DELETE FROM job_postings WHERE id = ? AND recruiter_id = ?",
+      [req.params.id, recruiterId]
+    );
+
+    if (!result.affectedRows) return res.status(404).json({ message: "Job not found" });
+    return res.json({ message: "Job deleted" });
+  } catch (err) {
+    console.error("[recruiter/jobs DELETE]", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ── GET /candidates ───────────────────────────────────────────
+router.get("/candidates", async (req, res) => {
+  try {
+    const { job_id, stage, q, page = 1, limit = 20 } = req.query;
+    const offset = (Number(page) - 1) * Number(limit);
+
+    const [[{ id: recruiterId }]] = await db.query(
+      "SELECT id FROM recruiter_profiles WHERE user_id = ?",
+      [req.user.id]
+    );
+
+    let where = "WHERE jp.recruiter_id = ?";
+    const params = [recruiterId];
+
+    if (job_id) { where += " AND a.job_id = ?"; params.push(job_id); }
+    if (stage)  { where += " AND a.stage = ?";  params.push(stage); }
+    if (q) {
+      where += " AND (u.name LIKE ? OR u.email LIKE ?)";
+      params.push(`%${q}%`, `%${q}%`);
+    }
+
+    const [[{ total }]] = await db.query(
+      `SELECT COUNT(*) AS total
+       FROM applications a
+       JOIN job_postings jp ON a.job_id = jp.id
+       JOIN users u ON a.user_id = u.id
+       ${where}`,
+      params
+    );
 
     const [candidates] = await db.query(
-      `SELECT u.id, u.name,
-              cp.location, cp.current_role, cp.current_company,
-              cp.years_of_experience, cp.skills, cp.linkedin_url,
-              cp.github_url, cp.portfolio_url, cp.notice_period,
-              cp.expected_salary
-       FROM candidate_profiles cp
-       JOIN users u ON u.id = cp.user_id
-       WHERE cp.is_visible_to_recruiters = TRUE
-       LIMIT 200`
+      `SELECT a.id AS application_id, a.stage, a.notes, a.created_at AS applied_at,
+              u.id AS user_id, u.name, u.email, u.avatar_url,
+              jp.id AS job_id, jp.title AS job_title
+       FROM applications a
+       JOIN job_postings jp ON a.job_id = jp.id
+       JOIN users u ON a.user_id = u.id
+       ${where}
+       ORDER BY a.created_at DESC
+       LIMIT ? OFFSET ?`,
+      [...params, Number(limit), offset]
     );
 
-    const scored = candidates
-      .map((c) => {
-        const skills = Array.isArray(c.skills)
-          ? c.skills
-          : (() => { try { return JSON.parse(c.skills || "[]"); } catch { return []; } })();
-
-        const matchedSkills = skills.filter((s) =>
-          jobDesc.includes(s.toLowerCase())
-        );
-        return { ...c, skills, matchedSkills, score: matchedSkills.length };
-      })
-      .filter((c) => c.score > 0)
-      .sort((a, b) => b.score - a.score);
-
-    return res.json({ job: jobs[0], candidates: scored });
+    return res.json({ candidates, total, page: Number(page), limit: Number(limit) });
   } catch (err) {
-    console.error("[recruiter:candidates-match]", err);
+    console.error("[recruiter/candidates GET]", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ── GET /candidates/:id ───────────────────────────────────────
+router.get("/candidates/:id", async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT a.id AS application_id, a.stage, a.notes, a.created_at AS applied_at,
+              a.resume_url, a.cover_letter,
+              u.id AS user_id, u.name, u.email, u.avatar_url,
+              jp.id AS job_id, jp.title AS job_title
+       FROM applications a
+       JOIN users u ON a.user_id = u.id
+       JOIN job_postings jp ON a.job_id = jp.id
+       JOIN recruiter_profiles rp ON jp.recruiter_id = rp.id
+       WHERE a.id = ? AND rp.user_id = ?`,
+      [req.params.id, req.user.id]
+    );
+
+    if (!rows.length) return res.status(404).json({ message: "Application not found" });
+    return res.json(rows[0]);
+  } catch (err) {
+    console.error("[recruiter/candidates/:id GET]", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ── POST /candidates/:id/status ───────────────────────────────
+router.post("/candidates/:id/status", async (req, res) => {
+  try {
+    const parsed = candidateStatusSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten().fieldErrors });
+    }
+
+    // Verify ownership
+    const [check] = await db.query(
+      `SELECT a.id FROM applications a
+       JOIN job_postings jp ON a.job_id = jp.id
+       JOIN recruiter_profiles rp ON jp.recruiter_id = rp.id
+       WHERE a.id = ? AND rp.user_id = ?`,
+      [req.params.id, req.user.id]
+    );
+    if (!check.length) return res.status(404).json({ message: "Application not found" });
+
+    await db.query(
+      "UPDATE applications SET stage = ?, notes = ?, updated_at = NOW() WHERE id = ?",
+      [parsed.data.stage, parsed.data.notes || null, req.params.id]
+    );
+
+    return res.json({ message: "Status updated", stage: parsed.data.stage });
+  } catch (err) {
+    console.error("[recruiter/candidates status]", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ── GET /analytics ────────────────────────────────────────────
+router.get("/analytics", async (req, res) => {
+  try {
+    const { days = 30 } = req.query;
+    const [[{ id: recruiterId }]] = await db.query(
+      "SELECT id FROM recruiter_profiles WHERE user_id = ?",
+      [req.user.id]
+    );
+
+    // Application funnel
+    const [funnel] = await db.query(
+      `SELECT stage, COUNT(*) AS count
+       FROM applications a
+       JOIN job_postings jp ON a.job_id = jp.id
+       WHERE jp.recruiter_id = ?
+       GROUP BY stage`,
+      [recruiterId]
+    );
+
+    // Daily applications trend
+    const [dailyApps] = await db.query(
+      `SELECT DATE(a.created_at) AS date, COUNT(*) AS count
+       FROM applications a
+       JOIN job_postings jp ON a.job_id = jp.id
+       WHERE jp.recruiter_id = ?
+         AND a.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+       GROUP BY DATE(a.created_at)
+       ORDER BY date`,
+      [recruiterId, Number(days)]
+    );
+
+    // Top performing jobs
+    const [topJobs] = await db.query(
+      `SELECT jp.title, jp.id,
+              COUNT(DISTINCT a.id) AS applications,
+              jp.views
+       FROM job_postings jp
+       LEFT JOIN applications a ON a.job_id = jp.id
+       WHERE jp.recruiter_id = ?
+       GROUP BY jp.id
+       ORDER BY applications DESC LIMIT 5`,
+      [recruiterId]
+    );
+
+    // Time-to-hire (avg days from applied to hired)
+    const [[timeToHire]] = await db.query(
+      `SELECT ROUND(AVG(DATEDIFF(a.updated_at, a.created_at)),1) AS avg_days
+       FROM applications a
+       JOIN job_postings jp ON a.job_id = jp.id
+       WHERE jp.recruiter_id = ? AND a.stage = 'hired'
+         AND a.updated_at >= DATE_SUB(NOW(), INTERVAL ? DAY)`,
+      [recruiterId, Number(days)]
+    );
+
+    return res.json({ funnel, dailyApps, topJobs, timeToHire });
+  } catch (err) {
+    console.error("[recruiter/analytics]", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ── GET /talent-pool ──────────────────────────────────────────
+router.get("/talent-pool", async (req, res) => {
+  try {
+    const [saved] = await db.query(
+      `SELECT u.id, u.name, u.email, u.avatar_url,
+              tp.notes, tp.created_at AS saved_at
+       FROM talent_pool tp
+       JOIN users u ON tp.candidate_id = u.id
+       WHERE tp.recruiter_user_id = ?
+       ORDER BY tp.created_at DESC`,
+      [req.user.id]
+    );
+    return res.json(saved);
+  } catch (err) {
+    console.error("[recruiter/talent-pool GET]", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ── POST /talent-pool/:userId ─────────────────────────────────
+router.post("/talent-pool/:userId", async (req, res) => {
+  try {
+    const notes = (req.body.notes || "").slice(0, 1000);
+    await db.query(
+      `INSERT INTO talent_pool (recruiter_user_id, candidate_id, notes)
+       VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE notes = VALUES(notes), updated_at = NOW()`,
+      [req.user.id, req.params.userId, notes]
+    );
+    return res.json({ message: "Saved to talent pool" });
+  } catch (err) {
+    console.error("[recruiter/talent-pool POST]", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ── DELETE /talent-pool/:userId ───────────────────────────────
+router.delete("/talent-pool/:userId", async (req, res) => {
+  try {
+    await db.query(
+      "DELETE FROM talent_pool WHERE recruiter_user_id = ? AND candidate_id = ?",
+      [req.user.id, req.params.userId]
+    );
+    return res.json({ message: "Removed from talent pool" });
+  } catch (err) {
+    console.error("[recruiter/talent-pool DELETE]", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ── POST /messages ────────────────────────────────────────────
+router.post("/messages", async (req, res) => {
+  try {
+    const parsed = messageSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten().fieldErrors });
+    }
+
+    const { recipient_id, subject, body } = parsed.data;
+
+    // Verify recipient exists
+    const [[recipient]] = await db.query("SELECT id, name, email FROM users WHERE id = ?", [recipient_id]);
+    if (!recipient) return res.status(404).json({ message: "Recipient not found" });
+
+    await db.query(
+      `INSERT INTO messages (sender_id, recipient_id, subject, body, read_at)
+       VALUES (?, ?, ?, ?, NULL)`,
+      [req.user.id, recipient_id, subject, body]
+    );
+
+    return res.status(201).json({ message: "Message sent" });
+  } catch (err) {
+    console.error("[recruiter/messages POST]", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ── GET /messages ─────────────────────────────────────────────
+router.get("/messages", async (req, res) => {
+  try {
+    const [messages] = await db.query(
+      `SELECT m.id, m.subject, m.body, m.read_at, m.created_at,
+              u.name AS recipient_name, u.email AS recipient_email
+       FROM messages m
+       JOIN users u ON m.recipient_id = u.id
+       WHERE m.sender_id = ?
+       ORDER BY m.created_at DESC LIMIT 50`,
+      [req.user.id]
+    );
+    return res.json(messages);
+  } catch (err) {
+    console.error("[recruiter/messages GET]", err);
     return res.status(500).json({ message: "Server error" });
   }
 });
