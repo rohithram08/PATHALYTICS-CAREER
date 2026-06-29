@@ -1,63 +1,54 @@
 // src/components/recruiter/RecruiterLayout.tsx
 //
 // Persistent sidebar layout for all recruiter pages.
-// Provides: brand, navigation, verification status badge, logout.
 // Desktop: sticky sidebar (w-64). Mobile: fixed top bar + slide-in drawer.
-//
-// Drop-in: no extra shadcn components needed beyond Button (already used app-wide).
 
 import { useState } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
-  LayoutDashboard,
-  Briefcase,
-  Plus,
-  User,
-  LogOut,
-  Menu,
-  X,
-  CheckCircle2,
-  AlertCircle,
-  Clock,
+  LayoutDashboard, Briefcase, Plus, User,
+  LogOut, Menu, X, CheckCircle2, AlertCircle, Clock,
+  Users, BarChart3,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-import { useAuth } from "@/hooks/useAuth";
-import type { AuthUser } from "@/contexts/AuthContext";
+import { Button }        from "@/components/ui/button";
+import { cn }            from "@/lib/utils";
+import { useAuth }       from "@/hooks/useAuth";
+import type { AuthUser } from "@/hooks/useAuth"; // re-exports from AuthContext — both paths work
 
-// ── Nav definition ─────────────────────────────────────────────────────
+// ── Nav definition ────────────────────────────────────────────────────────────
 
 const NAV: { label: string; href: string; icon: LucideIcon }[] = [
-  { label: "Dashboard",      href: "/recruiter/dashboard", icon: LayoutDashboard },
-  { label: "Manage Jobs",    href: "/recruiter/jobs",      icon: Briefcase },
-  { label: "Profile & Docs", href: "/recruiter/profile",   icon: User },
+  { label: "Dashboard",      href: "/recruiter/dashboard",  icon: LayoutDashboard },
+  { label: "Manage Jobs",    href: "/recruiter/jobs",       icon: Briefcase       },
+  { label: "Candidates",     href: "/recruiter/candidates", icon: Users           },
+  { label: "Analytics",      href: "/recruiter/analytics",  icon: BarChart3       },
+  { label: "Profile & Docs", href: "/recruiter/profile",    icon: User            },
 ];
 
-// ── Small reusable pieces ──────────────────────────────────────────────
+// ── Verification badge ────────────────────────────────────────────────────────
 
 function VerificationBadge({ status }: { status?: string }) {
   if (status === "verified")
     return (
       <span className="flex items-center gap-1 text-xs font-medium text-emerald-600">
-        <CheckCircle2 className="w-3 h-3" />
-        Verified
+        <CheckCircle2 className="w-3 h-3" /> Verified
       </span>
     );
   if (status === "rejected")
     return (
       <span className="flex items-center gap-1 text-xs font-medium text-red-600">
-        <AlertCircle className="w-3 h-3" />
-        Rejected
+        <AlertCircle className="w-3 h-3" /> Rejected
       </span>
     );
   return (
     <span className="flex items-center gap-1 text-xs font-medium text-yellow-600">
-      <Clock className="w-3 h-3" />
-      Pending review
+      <Clock className="w-3 h-3" /> Pending review
     </span>
   );
 }
+
+// ── Brand logo ────────────────────────────────────────────────────────────────
 
 function BrandLogo() {
   return (
@@ -72,15 +63,14 @@ function BrandLogo() {
   );
 }
 
-// ── Sidebar inner content (shared by desktop + mobile drawer) ──────────
-// Defined at module level so React never remounts it on parent re-render.
+// ── Sidebar inner (shared between desktop + mobile drawer) ────────────────────
 
 interface SidebarInnerProps {
-  user: AuthUser | null;
-  pathname: string;
+  user:                AuthUser | null;
+  pathname:            string;
   isVerifiedRecruiter: boolean;
-  onNavClick?: () => void;
-  onLogout: () => void;
+  onNavClick?:         () => void;
+  onLogout:            () => void;
 }
 
 function SidebarInner({
@@ -91,23 +81,15 @@ function SidebarInner({
   onLogout,
 }: SidebarInnerProps) {
   const initials = user?.name
-    ? user.name
-        .split(" ")
-        .map((n) => n[0])
-        .join("")
-        .slice(0, 2)
-        .toUpperCase()
+    ? user.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()
     : "R";
 
-  // Smart active matching: /recruiter/jobs/:id/edit and /recruiter/jobs/:id/applications
-  // both highlight "Manage Jobs", while /recruiter/jobs/new highlights "Post a Job".
   function isActive(href: string) {
     if (href === "/recruiter/dashboard") return pathname === href;
     if (href === "/recruiter/jobs")
       return (
         pathname === "/recruiter/jobs" ||
-        (pathname.startsWith("/recruiter/jobs/") &&
-          pathname !== "/recruiter/jobs/new")
+        (pathname.startsWith("/recruiter/jobs/") && pathname !== "/recruiter/jobs/new")
       );
     return pathname === href || pathname.startsWith(`${href}/`);
   }
@@ -116,16 +98,12 @@ function SidebarInner({
     <div className="flex flex-col h-full">
       {/* Brand */}
       <div className="h-16 flex items-center px-6 border-b shrink-0">
-        <Link
-          to="/recruiter/dashboard"
-          onClick={onNavClick}
-          className="flex items-center"
-        >
+        <Link to="/recruiter/dashboard" onClick={onNavClick} className="flex items-center">
           <BrandLogo />
         </Link>
       </div>
 
-      {/* Nav links */}
+      {/* Nav */}
       <nav className="flex-1 px-4 py-4 space-y-1 overflow-y-auto">
         {NAV.map((item) => (
           <Link
@@ -144,10 +122,9 @@ function SidebarInner({
           </Link>
         ))}
 
-        {/* Thin divider */}
         <div className="h-px bg-border mt-3 mb-3" />
 
-        {/* Post a Job — enabled only for verified recruiters */}
+        {/* Post a Job — locked until verified */}
         {isVerifiedRecruiter ? (
           <Link
             to="/recruiter/jobs/new"
@@ -163,7 +140,6 @@ function SidebarInner({
             Post a Job
           </Link>
         ) : (
-          // Grayed-out "Post a Job" that guides them to verify instead of doing nothing
           <Link
             to="/recruiter/profile"
             onClick={onNavClick}
@@ -179,23 +155,20 @@ function SidebarInner({
         )}
       </nav>
 
-      {/* User footer: avatar, name, verification status, logout */}
+      {/* User footer */}
       <div className="p-4 border-t space-y-3">
         <div className="flex items-center gap-3 px-2">
-          {/* Avatar — works with or without shadcn Avatar component */}
           <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0 overflow-hidden">
+            {/* AuthContext.tsx uses "avatar" — not "avatar_url" */}
             {user?.avatar ? (
-              <img
-                src={user.avatar}
-                alt={user.name || ""}
-                className="w-full h-full object-cover"
-              />
+              <img src={user.avatar} alt={user.name ?? ""} className="w-full h-full object-cover" />
             ) : (
               <span className="text-primary text-sm font-bold">{initials}</span>
             )}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold truncate">{user?.name || "Recruiter"}</p>
+            <p className="text-sm font-semibold truncate">{user?.name ?? "Recruiter"}</p>
+            {/* AuthContext.tsx uses "verificationStatus" — not "verification_status" */}
             <VerificationBadge status={user?.verificationStatus} />
           </div>
         </div>
@@ -213,12 +186,12 @@ function SidebarInner({
   );
 }
 
-// ── RecruiterLayout ────────────────────────────────────────────────────
+// ── RecruiterLayout ───────────────────────────────────────────────────────────
 
 const RecruiterLayout = () => {
   const { user, logout, isVerifiedRecruiter } = useAuth();
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigate  = useNavigate();
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const handleLogout = () => {
@@ -228,14 +201,14 @@ const RecruiterLayout = () => {
 
   const sidebarProps: SidebarInnerProps = {
     user,
-    pathname: location.pathname,
+    pathname:            location.pathname,
     isVerifiedRecruiter,
-    onLogout: handleLogout,
+    onLogout:            handleLogout,
   };
 
   return (
     <>
-      {/* ─── Mobile: Fixed top bar ─── */}
+      {/* Mobile: fixed top bar */}
       <header className="md:hidden fixed top-0 inset-x-0 z-30 h-14 flex items-center gap-3 px-4 border-b bg-card/95 backdrop-blur-sm">
         <button
           onClick={() => setDrawerOpen(true)}
@@ -249,7 +222,7 @@ const RecruiterLayout = () => {
         </Link>
       </header>
 
-      {/* ─── Mobile: Overlay + slide-in drawer ─── */}
+      {/* Mobile: slide-in drawer */}
       {drawerOpen && (
         <>
           <div
@@ -264,22 +237,18 @@ const RecruiterLayout = () => {
             >
               <X className="w-4 h-4" />
             </button>
-            <SidebarInner
-              {...sidebarProps}
-              onNavClick={() => setDrawerOpen(false)}
-            />
+            <SidebarInner {...sidebarProps} onNavClick={() => setDrawerOpen(false)} />
           </aside>
         </>
       )}
 
-      {/* ─── Desktop + mobile page shell ─── */}
+      {/* Desktop + page shell */}
       <div className="flex">
-        {/* Desktop sticky sidebar */}
         <aside className="hidden md:sticky md:top-0 md:flex md:h-screen w-64 flex-col border-r bg-card shrink-0 overflow-y-auto">
           <SidebarInner {...sidebarProps} />
         </aside>
 
-        {/* Main content — pt-14 offsets the fixed mobile header */}
+        {/* pt-14 offsets the mobile fixed header */}
         <main className="flex-1 min-h-screen pt-14 md:pt-0 overflow-x-hidden">
           <Outlet />
         </main>
