@@ -1,9 +1,8 @@
 // src/pages/Login.tsx
-// ONLY 3 changes from your original:
-//   1. import changed: "@/hooks/useAuth" → "@/contexts/AuthContext"
-//   2. credentials: "include" added to the login fetch
-//   3. catch (err: any) → catch (err) with instanceof check
-//   Everything else is identical to your original.
+// Changes from your original — exactly 2:
+//   1. credentials: "include" added to the login fetch
+//   2. catch (err: any) → catch (err) with instanceof check
+//   Import stays as @/hooks/useAuth — unchanged from your original.
 
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -26,7 +25,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
-import { useAuth } from "@/contexts/AuthContext"; // ← CHANGED (was @/hooks/useAuth)
+import { useAuth } from "@/hooks/useAuth"; // ← kept as your original
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
@@ -102,7 +101,7 @@ const Login = () => {
     try {
       const res = await fetch(`${API_URL}/api/auth/login`, {
         method: "POST",
-        credentials: "include", // ← ADDED: sends/receives httpOnly cookie
+        credentials: "include", // ← ADDED: ensures httpOnly cookie is set
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email: formData.email.trim(),
