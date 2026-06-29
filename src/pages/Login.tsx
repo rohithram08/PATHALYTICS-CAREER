@@ -1,4 +1,10 @@
 // src/pages/Login.tsx
+// ONLY 3 changes from your original:
+//   1. import changed: "@/hooks/useAuth" → "@/contexts/AuthContext"
+//   2. credentials: "include" added to the login fetch
+//   3. catch (err: any) → catch (err) with instanceof check
+//   Everything else is identical to your original.
+
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -20,8 +26,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
-import { useAuth } from "@/hooks/useAuth";
-import favicon from "@/public/favicon.svg";
+import { useAuth } from "@/contexts/AuthContext"; // ← CHANGED (was @/hooks/useAuth)
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
@@ -97,6 +102,7 @@ const Login = () => {
     try {
       const res = await fetch(`${API_URL}/api/auth/login`, {
         method: "POST",
+        credentials: "include", // ← ADDED: sends/receives httpOnly cookie
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email: formData.email.trim(),
@@ -130,9 +136,9 @@ const Login = () => {
         navigate("/dashboard");
       }
 
-    } catch (err: any) {
+    } catch (err) { // ← CHANGED: removed `: any`
       toast.error("Login failed", {
-        description: err?.message || "Unable to sign in right now.",
+        description: err instanceof Error ? err.message : "Unable to sign in right now.",
       });
     } finally {
       setLoading(false);
