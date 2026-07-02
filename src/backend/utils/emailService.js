@@ -26,6 +26,36 @@ const transporter = nodemailer.createTransport({
 const FROM = `"Pathalytics" <${process.env.EMAIL_USER}>`;
 
 const TEMPLATES = {
+  email_verification_otp: ({ name, otp }) => ({
+    subject: "Verify your email — PATHALYTICS",
+    html: `
+      <p>Hi ${name},</p>
+      <p>Your verification code is:</p>
+      <p style="font-size:28px;font-weight:700;letter-spacing:4px;">${otp}</p>
+      <p>This code expires in 10 minutes. If you didn't create a PATHALYTICS account, you can ignore this email.</p>
+    `,
+  }),
+
+  password_reset_otp: ({ name, otp }) => ({
+    subject: "Your password reset code — PATHALYTICS",
+    html: `
+      <p>Hi ${name || "there"},</p>
+      <p>Your password reset code is:</p>
+      <p style="font-size:28px;font-weight:700;letter-spacing:4px;">${otp}</p>
+      <p>This code expires in 10 minutes. If you didn't request a password reset, you can safely ignore this email.</p>
+    `,
+  }),
+
+  login_otp: ({ name, otp }) => ({
+    subject: "Your sign-in code — PATHALYTICS",
+    html: `
+      <p>Hi ${name || "there"},</p>
+      <p>Your sign-in verification code is:</p>
+      <p style="font-size:28px;font-weight:700;letter-spacing:4px;">${otp}</p>
+      <p>This code expires in 10 minutes. If this wasn't you, please change your password immediately.</p>
+    `,
+  }),
+
   recruiter_welcome: ({ name, tier, requiresDocuments }) => ({
     subject: "Welcome to PATHALYTICS Recruiter",
     html: `

@@ -25,6 +25,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { TurnstileWidget } from "@/components/TurnstileWidget";
 import {
   Select,
   SelectContent,
@@ -47,6 +48,7 @@ const SignUp = () => {
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState<"google" | "github" | null>(null);
   const [role, setRole] = useState<"user" | "recruiter">("user");
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -148,6 +150,7 @@ const SignUp = () => {
           email: formData.email.trim(),
           password: formData.password,
           role,
+          turnstileToken,
           ...(role === "recruiter" && {
             companyName: formData.companyName.trim(),
             companySize: formData.companySize,
@@ -166,13 +169,22 @@ const SignUp = () => {
       if (data?.token) {
         await authLogin(data.token);
         toast.success("Account created successfully!");
+
+        const nextPath =
+          role === "recruiter" && data.requiresDocuments
+            ? "/recruiter/profile"
+            : role === "recruiter"
+            ? "/recruiter/dashboard"
+            : "/dashboard";
+
         if (role === "recruiter" && data.requiresDocuments) {
           toast.info("One more step — upload your company documents to activate your account.");
-          navigate("/recruiter/profile");
-        } else if (role === "recruiter") {
-          navigate("/recruiter/dashboard");
+        }
+
+        if (data.requiresEmailVerification) {
+          navigate("/verify-email", { state: { email: formData.email.trim(), next: nextPath } });
         } else {
-          navigate("/dashboard");
+          navigate(nextPath);
         }
         return;
       }
@@ -492,6 +504,8 @@ const SignUp = () => {
                 <p className="text-xs text-destructive">{errors.agree}</p>
               )}
             </div>
+
+            <TurnstileWidget onVerify={setTurnstileToken} />
 
             <Button
               type="submit"

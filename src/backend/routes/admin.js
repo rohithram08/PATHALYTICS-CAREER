@@ -105,7 +105,7 @@ router.patch("/verifications/:documentId", async (req, res) => {
         if (pending[0].cnt === 0) {
           await conn.query(
             `UPDATE recruiter_profiles
-             SET verification_status = 'verified', verified_at = NOW(), verified_by = ?
+             SET verification_status = 'approved', verified_at = NOW(), verified_by = ?
              WHERE id = ?`,
             [req.user.id, doc.recruiter_profile_id]
           );

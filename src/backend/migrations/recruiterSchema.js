@@ -1,38 +1,23 @@
 // src/backend/migrations/recruiterSchema.js
 //
-// Adds the recruiter ecosystem schema on top of the existing PATHALYTICS
-// database (TiDB Cloud Serverless). Every statement checks for existence
-// first — safe to run more than once and safe to run on a live database.
+// Recruiter/candidate ecosystem schema, layered on top of what db.js
+// creates. Every statement checks for existence first — safe to run
+// more than once, safe to run on a live database.
 //
-// ── IMPORTANT: schema ownership ─────────────────────────────────────────
-// db.js runs initSchema() on every server start and ALREADY created these
-// tables with a specific shape:
+// This file now runs AUTOMATICALLY at the end of db.js's initSchema()
+// on every server boot (it used to be a separate manual step —
+// `npm run db:migrate:recruiter` — which meant a fresh deploy could
+// boot successfully while candidate-profile and notification routes
+// silently 500'd because nobody remembered to run it by hand). You can
+// still run it standalone with that same command; it's a no-op if
+// everything already exists.
 //
-//   recruiter_profiles  — uses verification_status ENUM('pending','approved','rejected')
-//                         and company_tier ENUM('top','mid','startup')
-//   jobs                — recruiter_id FK → recruiter_profiles(id), NOT users(id)
-//   pipeline_stages     — stage_type ENUM includes 'aptitude' (not 'aptitude_test')
-//   applications        — uses status ENUM with stage_1..stage_5 legacy values
-//   application_stage_history — (not application_status_history)
-//   company_verification_documents — already created by db.js
+// It intentionally opens its own connection pool rather than importing
+// db.js's `db` export, to avoid a circular import (db.js imports
+// initRecruiterSchema from this file).
 //
-// This migration therefore:
-//   1. Extends users.role to include 'recruiter' (idempotent ALTER)
-//   2. Adds MISSING COLUMNS to recruiter_profiles that db.js didn't include
-//      (company_domain, verified_at, verified_by)
-//   3. Creates only the tables db.js does NOT create:
-//      candidate_profiles, notification_log
-//   4. Skips tables that db.js already owns.
-//
-// Tables that look like they need a "redesign" (jobs FK target, applications
-// ENUM shape, history table name) are left as-is. Changing live table
-// structure requires a separate ALTER migration with a data-safety plan.
-//
-// IMPORTANT — TiDB does not support TRIGGERs. Status-history writes must
-// happen in Express route handlers inside a transaction.
-//
-// Run once, manually:
-//   npm run db:migrate:recruiter
+// IMPORTANT — TiDB does not support TRIGGERs. Status-history writes
+// happen in Express route handlers inside a transaction instead.
 //
 import mysql from "mysql2/promise";
 import dotenv from "dotenv";
@@ -56,12 +41,8 @@ const db = mysql.createPool({
   database: DB_NAME,
   waitForConnections: true,
   connectionLimit: 5,
-  ssl: { rejectUnauthorized: true },
+  ssl: process.env.DB_DISABLE_SSL === "true" ? undefined : { rejectUnauthorized: true },
 });
-
-console.log("◇ injected env from .env");
-console.log("  → database : " + DB_NAME);
-console.log("  → host     : " + (process.env.DB_HOST || process.env.TIDB_HOST || "localhost"));
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 const tableExists = async (table) => {
@@ -93,7 +74,6 @@ const createTableIfMissing = async (table, ddl) => {
     console.log(`✅ Created ${table}.`);
   } catch (err) {
     console.error(`❌ Failed to create ${table}:`, err.message, "\n", err.sql ?? "");
-    // Stop — later tables have FKs into earlier ones.
     throw err;
   }
 };
@@ -114,8 +94,9 @@ const addColumnIfMissing = async (table, column, definition) => {
   }
 };
 
-// ── Step 1: Extend users.role ────────────────────────────────────────────
+// ── Step 1: Extend users.role (idempotent — db.js also does this) ────────
 const extendUserRoleEnum = async () => {
+  if (!(await tableExists("users"))) return;
   const [rows] = await db.query(
     `SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS
      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'users' AND COLUMN_NAME = 'role'`,
@@ -138,35 +119,7 @@ const extendUserRoleEnum = async () => {
   }
 };
 
-// ── Step 2: Add missing columns to recruiter_profiles ────────────────────
-// db.js created the table but omitted company_domain, verified_at,
-// verified_by. These are needed by requireVerifiedRecruiter and the
-// admin verification workflow.
-const extendRecruiterProfiles = async () => {
-  if (!(await tableExists("recruiter_profiles"))) {
-    console.log("↪︎  recruiter_profiles not found — db.js hasn't run yet, skipping column extensions.");
-    return;
-  }
-
-  // company_domain: extracted from work email at sign-up
-  await addColumnIfMissing(
-    "recruiter_profiles", "company_domain",
-    "VARCHAR(150) NULL COMMENT 'domain from work email, e.g. acme.com' AFTER work_email"
-  );
-
-  // verified_at / verified_by: set by admin when approving the recruiter.
-  // verified_by references users(id) — allow SET NULL if the admin is deleted.
-  await addColumnIfMissing(
-    "recruiter_profiles", "verified_at",
-    "DATETIME NULL AFTER verification_notes"
-  );
-  await addColumnIfMissing(
-    "recruiter_profiles", "verified_by",
-    "INT NULL COMMENT 'admin user_id who approved' AFTER verified_at"
-  );
-};
-
-// ── Step 3: candidate_profiles ───────────────────────────────────────────
+// ── Step 2: candidate_profiles ────────────────────────────────────────────
 // `current_role` IS a reserved keyword in TiDB / MySQL — it must be
 // backticked everywhere: in CREATE TABLE, SELECT, INSERT, and UPDATE.
 const createCandidateProfiles = async () => {
@@ -188,6 +141,10 @@ const createCandidateProfiles = async () => {
       notice_period VARCHAR(50) NULL,
       resume_storage_key VARCHAR(255) NULL,
       skills JSON NULL,
+      work_experience JSON NULL COMMENT 'array of {title, company, startDate, endDate, description}',
+      education JSON NULL COMMENT 'array of {degree, institution, startYear, endYear}',
+      projects JSON NULL COMMENT 'array of {title, description, url, techStack}',
+      preferred_locations JSON NULL COMMENT 'array of preferred job location strings',
       is_visible_to_recruiters BOOLEAN NOT NULL DEFAULT TRUE
         COMMENT 'lets a student opt out of recruiter search even while applying to jobs',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -195,13 +152,18 @@ const createCandidateProfiles = async () => {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )`
   );
+  // Naukri-style expansion, added after the original table shipped —
+  // additive only, so existing rows just get NULL for the new fields.
+  await addColumnIfMissing("candidate_profiles", "work_experience", "JSON NULL COMMENT 'array of {title, company, startDate, endDate, description}'");
+  await addColumnIfMissing("candidate_profiles", "education", "JSON NULL COMMENT 'array of {degree, institution, startYear, endYear}'");
+  await addColumnIfMissing("candidate_profiles", "projects", "JSON NULL COMMENT 'array of {title, description, url, techStack}'");
+  await addColumnIfMissing("candidate_profiles", "preferred_locations", "JSON NULL COMMENT 'array of preferred job location strings'");
 };
 
-// ── Step 4: notification_log ─────────────────────────────────────────────
-// db.js created email_notifications (a send-queue table). notification_log
-// is a separate per-user inbox/audit log — a different concept.
-// NOTE: db.js jobs FK is recruiter_profiles(id), so related_job_id here
-// intentionally references jobs(id) directly.
+// ── Step 3: notification_log ─────────────────────────────────────────────
+// db.js creates email_notifications (a send-queue table). notification_log
+// is a separate per-user inbox/audit log — a different concept, written to
+// by utils/emailService.js every time sendNotification() fires.
 const createNotificationLog = async () => {
   await createTableIfMissing(
     "notification_log",
@@ -210,7 +172,7 @@ const createNotificationLog = async () => {
       recipient_user_id INT NOT NULL,
       recipient_role ENUM('user','recruiter') NOT NULL,
       notification_type VARCHAR(50) NOT NULL
-        COMMENT 'e.g. application_status_changed, recruiter_welcome, document_verified',
+        COMMENT 'e.g. application_status_changed, recruiter_welcome, document_verified, otp_requested',
       related_application_id INT NULL,
       related_job_id INT NULL,
       subject VARCHAR(255) NOT NULL,
@@ -227,29 +189,13 @@ const createNotificationLog = async () => {
 
 // ── Main ─────────────────────────────────────────────────────────────────
 export const initRecruiterSchema = async () => {
-  console.log("— Recruiter schema migration starting —");
+  console.log("— Recruiter/candidate schema migration starting —");
 
   await extendUserRoleEnum();
-  await extendRecruiterProfiles();
   await createCandidateProfiles();
   await createNotificationLog();
 
-  // Tables already managed by db.js — log that we're intentionally skipping:
-  for (const t of [
-    "recruiter_profiles",
-    "company_verification_documents",
-    "jobs",
-    "pipeline_stages",
-    "applications",
-    "application_stage_history",
-    "email_notifications",
-  ]) {
-    if (await tableExists(t)) {
-      console.log(`↪︎  ${t} owned by db.js — skipping.`);
-    }
-  }
-
-  console.log("— Recruiter schema migration complete —");
+  console.log("— Recruiter/candidate schema migration complete —");
 };
 
 const isMain =

@@ -9,10 +9,15 @@ import db from "../db.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 import { requireOwnJob } from "./jobs.js";
 import { sendNotification } from "../utils/emailService.js";
+import { checkStatusTransition, RECRUITER_SETTABLE_STATUSES } from "../utils/atsTransitions.js";
 
 const router = express.Router();
 
-const STATUS_VALUES = ["applied", "in-review", "interview", "offer", "rejected", "withdrawn"];
+// Aligned with RECRUITER_SETTABLE_STATUSES (utils/atsTransitions.js) — the
+// same vocabulary the recruiter dashboard UI uses. 'withdrawn' is
+// intentionally excluded here: only the candidate can withdraw their own
+// application, via POST /:id/withdraw below.
+const STATUS_VALUES = RECRUITER_SETTABLE_STATUSES;
 
 // ── Resume storage (private — same pattern as recruiter verification docs) ──
 const BASE_UPLOAD_DIR =
@@ -315,6 +320,13 @@ router.patch("/:id/status", requireAuth, requireRole("recruiter"), async (req, r
 
     const newStatus = parsed.data.status ?? application.status;
     const newStageId = parsed.data.stageId ?? application.current_stage_id;
+
+    if (parsed.data.status) {
+      const transition = checkStatusTransition(application.status, parsed.data.status);
+      if (!transition.ok) {
+        return res.status(409).json({ message: transition.reason });
+      }
+    }
 
     const conn = await db.getConnection();
     try {

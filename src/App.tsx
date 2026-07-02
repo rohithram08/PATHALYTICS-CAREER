@@ -43,6 +43,7 @@ const NotFound                    = lazy(() => import("./pages/NotFound"));
 // Guest-only auth pages
 const Login                       = lazy(() => import("./pages/Login"));
 const SignUp                      = lazy(() => import("./pages/SignUp"));
+const VerifyEmail                 = lazy(() => import("./pages/VerifyEmail"));
 const ForgotPassword              = lazy(() => import("./pages/ForgotPassword"));
 
 // Protected – students / regular users
@@ -139,6 +140,10 @@ const App = () => (
                     element={<GuestGuard><SignUp /></GuestGuard>} />
                   <Route path="/forgot-password"
                     element={<GuestGuard><ForgotPassword /></GuestGuard>} />
+
+                  {/* Reached right after signup — user already has a session,
+                      so this is deliberately NOT behind GuestGuard. */}
+                  <Route path="/verify-email" element={<VerifyEmail />} />
 
                   {/* ── Protected (students / regular users) ───────────────────── */}
                   <Route element={<ProtectedRoute />}>

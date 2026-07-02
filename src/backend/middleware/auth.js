@@ -95,6 +95,47 @@ export function requireRole(...roles) {
 export const requireRecruiter = requireRole("recruiter", "admin");
 export const requireAdmin = requireRole("admin");
 
+// ── Verified-recruiter guard ──────────────────────────────────
+// Must run AFTER requireAuth + requireRole("recruiter"). Blocks
+// recruiters whose company hasn't been approved yet (see
+// recruiter_profiles.verification_status: pending|approved|rejected)
+// from doing anything candidate-facing, e.g. publishing a job.
+// Admins bypass this check.
+export async function requireVerifiedRecruiter(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ message: "Authentication required" });
+  }
+  if (req.user.role === "admin") return next();
+
+  try {
+    const [rows] = await db.query(
+      "SELECT verification_status FROM recruiter_profiles WHERE user_id = ?",
+      [req.user.id]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ message: "Recruiter profile not found. Please complete your profile first." });
+    }
+
+    const { verification_status } = rows[0];
+
+    if (verification_status !== "approved") {
+      return res.status(403).json({
+        message:
+          verification_status === "rejected"
+            ? "Your recruiter account verification was rejected. Please re-upload a valid document."
+            : "Your recruiter account is pending verification. This action will be available once approved.",
+        verificationStatus: verification_status,
+      });
+    }
+
+    next();
+  } catch (err) {
+    console.error("[requireVerifiedRecruiter]", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+}
+
 // ── Optional auth (attaches user if token is valid, doesn't block) ──
 export async function optionalAuth(req, res, next) {
   const token = extractToken(req);

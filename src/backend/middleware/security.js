@@ -90,17 +90,21 @@ export const uploadLimiter = rateLimit({
 });
 
 // ── 4. Input sanitisation ─────────────────────────────────────
-const SQLI_PATTERNS = [
-  /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|UNION|FROM|WHERE)\b)/gi,
-  /(--)|(;)|(\|\|)/g,
-  /(\/\*.*\*\/)/g,
-  /\bxp_/gi,
-];
-
-function isSQLi(value) {
-  return SQLI_PATTERNS.some((re) => re.test(value));
-}
-
+// NOTE: this used to also block requests whose body/query contained
+// words like SELECT/FROM/WHERE or a semicolon, as a SQL-injection
+// guard. That check has been removed — it wasn't providing real
+// protection (every db.query() call in this codebase already uses
+// parameterized `?` placeholders, which is what actually prevents
+// SQL injection) and it WAS breaking completely ordinary input: a
+// job description saying "requirements FROM the team", a bio saying
+// "WHERE I gained experience", or any comma/semicolon-separated
+// skills list would all have been rejected with a 400. A keyword
+// blocklist on free text is the wrong tool here; parameterized
+// queries are the real defense and are already in place everywhere.
+//
+// What's kept: HTML/script stripping via the `xss` library, which
+// doesn't have that false-positive problem and is worth doing on any
+// field that might later be rendered as HTML.
 function sanitiseValue(val) {
   if (typeof val !== "string") return val;
   const trimmed = val.trim();
@@ -125,16 +129,17 @@ function deepSanitise(obj) {
 }
 
 export function sanitiseInput(req, res, next) {
-  // Check for obvious SQL injection
-  const raw = JSON.stringify(req.body) + JSON.stringify(req.query);
-  if (isSQLi(raw)) {
-    auditLog("SQLI_ATTEMPT", req, { body: req.body, query: req.query });
-    return res.status(400).json({ message: "Invalid characters in request" });
-  }
-
-  // Strip XSS from body and query
   req.body = deepSanitise(req.body);
-  req.query = deepSanitise(req.query);
+
+  // Express 5 exposes req.query as a getter-only accessor — assigning
+  // `req.query = ...` throws "Cannot set property query of
+  // #<IncomingMessage> which has only a getter" on every single request.
+  // Mutate the existing object's keys in place instead of replacing the
+  // reference.
+  const cleanedQuery = deepSanitise(req.query);
+  for (const key of Object.keys(req.query)) delete req.query[key];
+  Object.assign(req.query, cleanedQuery);
+
   next();
 }
 

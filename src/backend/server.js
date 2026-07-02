@@ -37,6 +37,7 @@ import greenhouseApplyRoutes from "./routes/greenhouse-apply.js";
 import recruiterRoutes       from "./routes/recruiter.js";
 import applicationsRoutes    from "./routes/applications.js";
 import adminRoutes           from "./routes/admin.js";
+import { sanitiseInput } from "./middleware/security.js";
 
 const app = express();
 
@@ -108,6 +109,11 @@ app.use(express.json({ limit: "50kb" }));
 app.use(express.urlencoded({ extended: false, limit: "50kb" }));
 app.use(cookieParser());
 
+// ── 3b. Input sanitisation ───────────────────────────────────
+// Was defined in middleware/security.js but never actually applied
+// anywhere in the request pipeline — dead code until now.
+app.use(sanitiseInput);
+
 // ── 4. Request logging ───────────────────────────────────────
 if (process.env.NODE_ENV !== "production") {
   app.use(morgan("dev"));
@@ -149,10 +155,12 @@ app.get("/api/health", (_req, res) =>
 // they are already registered at step 3 above.
 app.use("/api/auth",         authRoutes);
 app.use("/api/user",         meRoutes);         // GET /api/user/me ← fixes 404
+app.use("/api/auth",         meRoutes);         // GET /api/auth/me ← AuthContext.tsx and src/lib/api.ts both call this path; same router, same behaviour, just also reachable here.
 app.use("/api/auth",         oauthRoutes);
 app.use("/api/auth",         passwordRoutes);
 app.use("/api/jobs",         jobsRoutes);
 app.use("/api/chatbot",      chatbotRoutes);
+app.use("/api/chat",         chatbotRoutes);    // Chatbot.tsx / ChatAssistant.tsx call /api/chat (no "bot") — same router, dual-mounted rather than editing two frontend files.
 app.use("/api/greenhouse",   greenhouseApplyRoutes);
 app.use("/api/recruiter",    recruiterRoutes);
 app.use("/api/applications", applicationsRoutes);
@@ -183,13 +191,16 @@ app.use((err, req, res, _next) => {
   });
 });
 
-// ── 12. Start server ─────────────────────────────────────────
-const PORT = parseInt(process.env.PORT || "5000", 10);
-
-app.listen(PORT, () => {
-  console.log(`✅ Pathalytics API running on port ${PORT}`);
+// ── 12. Export app — start.js is responsible for calling listen() ──
+// (Previously this file ALSO called app.listen() here, in addition to
+// start.js calling it again after importing this module — two servers
+// both trying to bind the same PORT. The second .listen() call throws
+// EADDRINUSE, and an unhandled 'error' event on a net.Server crashes
+// the process by default. One listener, in one place, now.)
+if (process.env.NODE_ENV !== "test") {
+  console.log(`✅ Pathalytics API ready (port ${process.env.PORT || 5000} — bound by start.js)`);
   console.log(`   Environment : ${process.env.NODE_ENV}`);
   console.log(`   Allowed CORS: ${PROD_ORIGIN} + Vercel previews`);
-});
+}
 
 export default app;

@@ -33,7 +33,7 @@ export interface AuthUser {
   }>;
   // Recruiter-only fields — undefined for ordinary users
   companyTier?: "top" | "mid" | "low";
-  verificationStatus?: "pending" | "verified" | "rejected";
+  verificationStatus?: "pending" | "approved" | "rejected";
 }
 
 export interface AuthContextType {
@@ -261,7 +261,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, [clearAuth, fetchUserProfile]);
 
   const isRecruiter = user?.role === "recruiter";
-  const isVerifiedRecruiter = isRecruiter && user?.verificationStatus === "verified";
+  const isVerifiedRecruiter = isRecruiter && user?.verificationStatus === "approved";
 
   const value = useMemo(
     () => ({

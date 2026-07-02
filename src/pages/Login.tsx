@@ -24,6 +24,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { TurnstileWidget } from "@/components/TurnstileWidget";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth"; // ← kept as your original
 
@@ -37,6 +38,7 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState<"google" | "github" | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     email: "",
     password: "",
@@ -106,6 +108,7 @@ const Login = () => {
         body: JSON.stringify({
           email: formData.email.trim(),
           password: formData.password,
+          turnstileToken,
         }),
       });
 
@@ -314,6 +317,8 @@ const Login = () => {
                 Remember me for 30 days
               </Label>
             </div>
+
+            <TurnstileWidget onVerify={setTurnstileToken} />
 
             <Button
               type="submit"

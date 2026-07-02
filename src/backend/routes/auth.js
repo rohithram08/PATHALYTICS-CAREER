@@ -1,51 +1,106 @@
 // src/backend/routes/auth.js
 // ─────────────────────────────────────────────────────────────
-// Authentication routes: signup, login, logout, OTP flow
+// Authentication routes: signup, login, logout, OTP verification,
+// password reset.
 //
-// Security fixes vs old version:
-//   1. OTP now uses crypto.randomInt() — NOT Math.random()
-//      Math.random() is NOT cryptographically secure. A smart
-//      attacker can predict it by analyzing enough outputs.
-//      crypto.randomInt() uses the OS's secure RNG.
+// ── What's new in this pass ─────────────────────────────────
+//   • Signup now sends a real email-verification OTP (previously
+//     users.email_verified was set to 0 at signup and NOTHING ever
+//     set it back to 1 — there was no verification flow at all).
+//   • Escalating resend cooldown (1 min, 2 min, 3 min…) on every
+//     OTP send, shared by signup verification, login, and password
+//     reset via utils/otpService.js — enforced server-side so it
+//     can't be bypassed by hitting the endpoint directly.
+//   • Cloudflare Turnstile bot-check on signup/login/forgot-password
+//     (no-ops with a warning until TURNSTILE_SECRET_KEY is set).
+//   • Recruiter domain verification: a corporate email domain is
+//     auto-approved; a generic one (gmail.com, yahoo.com, …) stays
+//     'pending' and the account is told a document upload is needed
+//     — using the company_verification_documents flow that already
+//     existed in admin.js/recruiter.js but was never triggered from
+//     here at signup time.
+//   • OTP emails now go through utils/emailService.js's TEMPLATES,
+//     which also logs every OTP send to notification_log (previously
+//     they were fired from an ad-hoc local `getMailer()` and never
+//     logged anywhere).
+//   • Sliding-window rate limiting (rate-limiter-flexible) on
+//     login/signup/OTP endpoints, replacing express-rate-limit's
+//     fixed-window limiter, which resets hard at each window
+//     boundary rather than smoothing over time.
 //
-//   2. Login sets JWT in httpOnly cookie AND returns token
-//      (cookie is the secure path; token in body is for
-//      mobile app clients that can't use cookies)
-//
-//   3. Account lockout after 5 failed attempts (15 min)
-//
-//   4. Logout clears the cookie properly
-//
-//   5. Signup now reads role from request body and creates
-//      recruiter_profiles row immediately for recruiter signups
+// Existing hardening kept as-is:
+//   1. OTP uses crypto.randomInt() (utils/otpService.js) — not Math.random().
+//   2. Login sets JWT in an httpOnly cookie AND returns it in the body
+//      (cookie is the secure path; token in body is for mobile clients).
+//   3. Account lockout after 5 failed attempts (15 min).
+//   4. Logout clears the cookie properly.
 // ─────────────────────────────────────────────────────────────
 
 import express from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import nodemailer from "nodemailer";
-import rateLimit from "express-rate-limit";
-import crypto from "crypto";
 import { z } from "zod";
+import { RateLimiterMemory } from "rate-limiter-flexible";
 import db from "../db.js";
+import { verifyTurnstile } from "../middleware/turnstile.js";
+import { sendNotification } from "../utils/emailService.js";
+import {
+  OTP_PURPOSES,
+  checkResendCooldown,
+  checkResendCooldownByEmail,
+  issueOtp,
+  verifyOtp,
+} from "../utils/otpService.js";
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET;
 
-// ── Rate limiters ─────────────────────────────────────────────
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,   // 10 login attempts per 15 minutes per IP
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { message: "Too many attempts. Please try again in 15 minutes." },
-});
+// ── Sliding-window rate limiters ────────────────────────────────
+// rate-limiter-flexible tracks consumption continuously rather than
+// resetting hard at a fixed window boundary, which is what the spec
+// asks for under "Bot Protection". Keyed by IP; login/signup are also
+// worth keying by email to stop a distributed attack on one account,
+// so we consume from both keyspaces.
+const authLimiterByIp = new RateLimiterMemory({ points: 10, duration: 15 * 60 });
+const authLimiterByEmail = new RateLimiterMemory({ points: 8, duration: 15 * 60 });
+const otpLimiterByIp = new RateLimiterMemory({ points: 8, duration: 60 * 60 });
 
-const otpLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  max: 3,    // 3 OTP requests per hour per IP
-  message: { message: "Too many OTP requests. Please try again later." },
-});
+async function slidingAuthLimiter(req, res, next) {
+  try {
+    const email = (req.body?.email || "").toLowerCase().trim();
+    await authLimiterByIp.consume(req.ip);
+    if (email) await authLimiterByEmail.consume(email);
+    next();
+  } catch {
+    return res.status(429).json({ message: "Too many attempts. Please try again in a few minutes." });
+  }
+}
+
+async function slidingOtpLimiter(req, res, next) {
+  try {
+    await otpLimiterByIp.consume(req.ip);
+    next();
+  } catch {
+    return res.status(429).json({ message: "Too many requests. Please try again later." });
+  }
+}
+
+// ── Generic (non-Gmail/Yahoo/etc) domain check for recruiters ──
+const GENERIC_EMAIL_DOMAINS = new Set([
+  "gmail.com", "googlemail.com", "yahoo.com", "yahoo.in", "yahoo.co.in",
+  "outlook.com", "hotmail.com", "live.com", "msn.com", "icloud.com",
+  "me.com", "aol.com", "protonmail.com", "proton.me", "pm.me",
+  "rediffmail.com", "zoho.com", "mail.com", "gmx.com", "yandex.com",
+  "qq.com", "163.com", "126.com", "inbox.com", "rocketmail.com",
+]);
+
+function emailDomain(email) {
+  return (email.split("@")[1] || "").toLowerCase().trim();
+}
+
+function isGenericEmailDomain(email) {
+  return GENERIC_EMAIL_DOMAINS.has(emailDomain(email));
+}
 
 // ── Validation schemas ────────────────────────────────────────
 const signupSchema = z.object({
@@ -63,6 +118,17 @@ const signupSchema = z.object({
 const loginSchema = z.object({
   email:    z.string().email().toLowerCase().trim(),
   password: z.string().min(1).max(200),
+});
+
+const otpRequestSchema = z.object({
+  email: z.string().email().toLowerCase().trim(),
+  purpose: z.enum(Object.values(OTP_PURPOSES)),
+});
+
+const otpVerifySchema = z.object({
+  email: z.string().email().toLowerCase().trim(),
+  purpose: z.enum(Object.values(OTP_PURPOSES)),
+  otp: z.string().length(6).regex(/^\d{6}$/, "OTP must be 6 digits"),
 });
 
 // ── JWT + cookie helper ───────────────────────────────────────
@@ -83,23 +149,16 @@ function setAuthCookie(res, token) {
   });
 }
 
-// ── Email transporter (created once, reused) ──────────────────
-let mailer = null;
-function getMailer() {
-  if (!mailer) {
-    mailer = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,      // use Gmail App Password, NOT main password
-      },
-    });
-  }
-  return mailer;
+// Shape the "please wait Nm" response consistently across all OTP endpoints.
+function cooldownResponse(res, cooldown) {
+  return res.status(429).json({
+    message: `Please wait ${cooldown.nextWaitMinutes} minute${cooldown.nextWaitMinutes === 1 ? "" : "s"} before requesting another code.`,
+    retryAfterSeconds: cooldown.retryAfterSeconds,
+  });
 }
 
 // ── POST /api/auth/signup ─────────────────────────────────────
-router.post("/signup", authLimiter, async (req, res) => {
+router.post("/signup", slidingAuthLimiter, verifyTurnstile, async (req, res) => {
   try {
     const parsed = signupSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -110,19 +169,11 @@ router.post("/signup", authLimiter, async (req, res) => {
     }
 
     const { name, email, password } = parsed.data;
-
-    // Read role from body — only allow safe values, default to 'user'
     const role = req.body.role === "recruiter" ? "recruiter" : "user";
 
-    const [existing] = await db.query(
-      "SELECT id FROM users WHERE email = ?",
-      [email]
-    );
-    // Generic message — don't reveal whether email exists
+    const [existing] = await db.query("SELECT id FROM users WHERE email = ?", [email]);
     if (existing.length > 0) {
-      return res.status(400).json({
-        message: "An account with this email already exists",
-      });
+      return res.status(400).json({ message: "An account with this email already exists" });
     }
 
     const hashedPassword = await bcrypt.hash(password, 12);
@@ -133,32 +184,64 @@ router.post("/signup", authLimiter, async (req, res) => {
     );
     const userId = result.insertId;
 
-    // If recruiter, create the recruiter_profiles row immediately
-    // so RecruiterGuard and /api/recruiter/profile work right away.
+    let requiresDocuments = false;
+
     if (role === "recruiter") {
       const companyName = (req.body.companyName || "").trim();
       const companySize = req.body.companySize  || "1-10";
       const industry    = (req.body.industry    || "").trim();
       const designation = (req.body.designation || "").trim();
+      const domain = emailDomain(email);
+      const generic = isGenericEmailDomain(email);
+      requiresDocuments = generic;
 
+      // Corporate domain → auto-approved. Generic domain → stays
+      // 'pending' until a verification document is uploaded and an
+      // admin approves it (see POST /api/recruiter/documents/upload
+      // and PATCH /api/admin/verifications/:id).
       await db.query(
         `INSERT INTO recruiter_profiles
-           (user_id, company_name, company_size, industry, designation, verification_status)
-         VALUES (?, ?, ?, ?, ?, 'pending')`,
-        [userId, companyName, companySize, industry, designation]
+           (user_id, company_name, company_size, industry, designation,
+            work_email, company_domain, verification_status, verified_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          userId, companyName, companySize, industry, designation,
+          email, domain,
+          generic ? "pending" : "approved",
+          generic ? null : new Date(),
+        ]
       );
+
+      sendNotification("recruiter_welcome", {
+        to: email,
+        userId,
+        role: "recruiter",
+        name,
+        tier: companySize,
+        requiresDocuments,
+      });
     }
 
-    // Sign a token so the frontend can log in immediately after signup
+    // Kick off email verification — doesn't block signup/login, but
+    // the account is flagged unverified until this completes.
+    const cooldown = await checkResendCooldown(userId);
+    if (cooldown.allowed) {
+      const { otp } = await issueOtp(userId, OTP_PURPOSES.SIGNUP_VERIFY, { resetCycle: true });
+      sendNotification("email_verification_otp", {
+        to: email, userId, role: role === "recruiter" ? "recruiter" : "user",
+        name, otp,
+      });
+    }
+
     const token = signToken({ id: userId, email, role });
     setAuthCookie(res, token);
 
     return res.status(201).json({
       message: "Account created successfully.",
       token,
-      user: { id: userId, name, email, role },
-      // Frontend uses this flag to show the "upload documents" nudge
-      requiresDocuments: role === "recruiter",
+      user: { id: userId, name, email, role, emailVerified: false },
+      requiresDocuments,
+      requiresEmailVerification: true,
     });
   } catch (err) {
     console.error("[signup]", err);
@@ -167,7 +250,7 @@ router.post("/signup", authLimiter, async (req, res) => {
 });
 
 // ── POST /api/auth/login ──────────────────────────────────────
-router.post("/login", authLimiter, async (req, res) => {
+router.post("/login", slidingAuthLimiter, verifyTurnstile, async (req, res) => {
   try {
     const parsed = loginSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -177,18 +260,17 @@ router.post("/login", authLimiter, async (req, res) => {
     const { email, password } = parsed.data;
 
     const [users] = await db.query(
-      `SELECT id, name, email, password, role, failed_login_attempts, locked_until
+      `SELECT id, name, email, password, role, failed_login_attempts, locked_until, email_verified
        FROM users WHERE email = ?`,
       [email]
     );
 
-    // Timing-safe: always run bcrypt even if user not found
-    // This prevents timing attacks that reveal if an email is registered
+    // Timing-safe: always run bcrypt even if user not found, so response
+    // time doesn't reveal whether the email is registered.
     const DUMMY_HASH = "$2b$12$abcdefghijklmnopqrstuvwxyz012345678901234567890";
     const user = users[0] || null;
     const hashToCompare = user ? user.password || DUMMY_HASH : DUMMY_HASH;
 
-    // Check account lockout BEFORE comparing password
     if (user?.locked_until && new Date(user.locked_until) > new Date()) {
       const unlockAt = new Date(user.locked_until).toLocaleTimeString();
       return res.status(429).json({
@@ -199,11 +281,9 @@ router.post("/login", authLimiter, async (req, res) => {
     const isValid = await bcrypt.compare(password, hashToCompare);
 
     if (!user || !isValid) {
-      // Increment failed attempts counter
       if (user) {
         const newAttempts = (user.failed_login_attempts || 0) + 1;
         if (newAttempts >= 5) {
-          // Lock for 15 minutes
           const lockUntil = new Date(Date.now() + 15 * 60 * 1000);
           await db.query(
             "UPDATE users SET failed_login_attempts = ?, locked_until = ? WHERE id = ?",
@@ -219,7 +299,6 @@ router.post("/login", authLimiter, async (req, res) => {
       return res.status(401).json({ message: "Invalid email or password" });
     }
 
-    // Reset failed attempts on successful login
     await db.query(
       "UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?",
       [user.id]
@@ -229,12 +308,10 @@ router.post("/login", authLimiter, async (req, res) => {
     setAuthCookie(res, token);
 
     return res.json({
-      token,   // also in body for mobile API clients
+      token,
       user: {
-        id:    user.id,
-        name:  user.name,
-        email: user.email,
-        role:  user.role,
+        id: user.id, name: user.name, email: user.email, role: user.role,
+        emailVerified: !!user.email_verified,
       },
     });
   } catch (err) {
@@ -254,49 +331,128 @@ router.post("/logout", (req, res) => {
   res.json({ message: "Logged out successfully" });
 });
 
-// ── POST /api/auth/forgot-password ───────────────────────────
-router.post("/forgot-password", otpLimiter, async (req, res) => {
+// ── POST /api/auth/resend-otp ─────────────────────────────────
+// Generic, purpose-scoped resend used by email verification, login
+// 2FA (future), and password reset alike. Enforces the escalating
+// 1-min/2-min/3-min… cooldown server-side, so it can't be bypassed
+// by calling this repeatedly instead of using a "resend" button.
+router.post("/resend-otp", slidingOtpLimiter, verifyTurnstile, async (req, res) => {
   try {
-    const email = z.string().email().parse(
-      (req.body.email || "").toLowerCase().trim()
+    const parsed = otpRequestSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: "Invalid request" });
+    const { email, purpose } = parsed.data;
+
+    const found = await checkResendCooldownByEmail(email);
+    // Don't reveal whether the account exists for password-reset requests.
+    const GENERIC_MSG = { message: "If an account exists, a new code has been sent." };
+    if (!found) return res.json(GENERIC_MSG);
+
+    const { userId, cooldown } = found;
+    if (!cooldown.allowed) return cooldownResponse(res, cooldown);
+
+    const [[user]] = await db.query("SELECT name, role FROM users WHERE id = ?", [userId]);
+    const { otp } = await issueOtp(userId, purpose, { resetCycle: cooldown.resetCycle });
+
+    const templateByPurpose = {
+      [OTP_PURPOSES.SIGNUP_VERIFY]: "email_verification_otp",
+      [OTP_PURPOSES.LOGIN_2FA]: "login_otp",
+      [OTP_PURPOSES.PASSWORD_RESET]: "password_reset_otp",
+    };
+
+    sendNotification(templateByPurpose[purpose], {
+      to: email, userId, role: user.role === "recruiter" ? "recruiter" : "user",
+      name: user.name, otp,
+    });
+
+    return res.json(GENERIC_MSG);
+  } catch (err) {
+    console.error("[resend-otp]", err);
+    return res.status(500).json({ message: "Unable to process request" });
+  }
+});
+
+// ── POST /api/auth/verify-otp ─────────────────────────────────
+// Generic verify — confirms the code is correct for {email, purpose}
+// without taking any further action. Used standalone by the
+// forgot-password UI (verify code, then show the new-password step)
+// and internally by /verify-email below.
+router.post("/verify-otp", slidingOtpLimiter, async (req, res) => {
+  try {
+    const parsed = otpVerifySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: "Invalid request" });
+    const { email, purpose, otp } = parsed.data;
+
+    const [[user]] = await db.query("SELECT id FROM users WHERE email = ?", [email]);
+    if (!user) return res.status(400).json({ message: "Invalid or expired code" });
+
+    const result = await verifyOtp(user.id, purpose, otp);
+    if (!result.valid) {
+      return res.status(400).json({ message: "Invalid or expired code" });
+    }
+
+    if (purpose === OTP_PURPOSES.SIGNUP_VERIFY) {
+      await db.query("UPDATE users SET email_verified = 1 WHERE id = ?", [user.id]);
+    }
+
+    // Short-lived, single-purpose token so a follow-up action (e.g.
+    // reset-password) can prove "yes, this OTP step already passed"
+    // without asking the user to re-type the code.
+    const verifiedToken = jwt.sign(
+      { id: user.id, email, purpose, verified: true },
+      JWT_SECRET,
+      { expiresIn: "10m" }
     );
 
-    const [users] = await db.query(
-      "SELECT id FROM users WHERE email = ?",
-      [email]
-    );
+    return res.json({ message: "Verified", verifiedToken });
+  } catch (err) {
+    console.error("[verify-otp]", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
 
-    // Always return same message — don't reveal if email is registered
+// ── POST /api/auth/verify-email ───────────────────────────────
+// Thin, explicit alias of verify-otp scoped to signup verification —
+// kept separate so the intent is obvious from the frontend call site.
+router.post("/verify-email", slidingOtpLimiter, async (req, res) => {
+  try {
+    const schema = z.object({
+      email: z.string().email().toLowerCase().trim(),
+      otp: z.string().length(6).regex(/^\d{6}$/),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: "Invalid request" });
+
+    const [[user]] = await db.query("SELECT id FROM users WHERE email = ?", [parsed.data.email]);
+    if (!user) return res.status(400).json({ message: "Invalid or expired code" });
+
+    const result = await verifyOtp(user.id, OTP_PURPOSES.SIGNUP_VERIFY, parsed.data.otp);
+    if (!result.valid) return res.status(400).json({ message: "Invalid or expired code" });
+
+    await db.query("UPDATE users SET email_verified = 1 WHERE id = ?", [user.id]);
+    return res.json({ message: "Email verified successfully." });
+  } catch (err) {
+    console.error("[verify-email]", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ── POST /api/auth/forgot-password ───────────────────────────
+router.post("/forgot-password", slidingOtpLimiter, verifyTurnstile, async (req, res) => {
+  try {
+    const email = z.string().email().parse((req.body.email || "").toLowerCase().trim());
     const GENERIC_MSG = { message: "If an account exists for that email, an OTP has been sent." };
 
-    if (users.length === 0) return res.json(GENERIC_MSG);
+    const found = await checkResendCooldownByEmail(email);
+    if (!found) return res.json(GENERIC_MSG);
 
-    // ✅ FIX: Use crypto.randomInt() instead of Math.random()
-    // Math.random() is NOT cryptographically secure!
-    const otp = String(crypto.randomInt(100000, 999999));
-    const otpHash = await bcrypt.hash(otp, 10);
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);  // 10 minutes
+    const { userId, cooldown } = found;
+    if (!cooldown.allowed) return cooldownResponse(res, cooldown);
 
-    await db.query(
-      "UPDATE users SET otp = ?, otp_expires_at = ? WHERE email = ?",
-      [otpHash, expiresAt, email]
-    );
+    const [[user]] = await db.query("SELECT name FROM users WHERE id = ?", [userId]);
+    const { otp } = await issueOtp(userId, OTP_PURPOSES.PASSWORD_RESET, { resetCycle: cooldown.resetCycle });
 
-    await getMailer().sendMail({
-      from:    `"Pathalytics" <${process.env.EMAIL_USER}>`,
-      to:      email,
-      subject: "Your Password Reset OTP",
-      html: `
-        <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
-          <h2>Password Reset</h2>
-          <p>Use the OTP below to reset your Pathalytics password.</p>
-          <div style="font-size:32px;font-weight:bold;letter-spacing:8px;padding:20px;background:#f5f5f5;text-align:center;border-radius:8px">
-            ${otp}
-          </div>
-          <p style="color:#888;font-size:13px">This OTP expires in <strong>10 minutes</strong>.</p>
-          <p style="color:#888;font-size:13px">If you did not request this, please ignore this email.</p>
-        </div>
-      `,
+    sendNotification("password_reset_otp", {
+      to: email, userId, role: "user", name: user.name, otp,
     });
 
     return res.json(GENERIC_MSG);
@@ -307,7 +463,7 @@ router.post("/forgot-password", otpLimiter, async (req, res) => {
 });
 
 // ── POST /api/auth/reset-password ────────────────────────────
-router.post("/reset-password", authLimiter, async (req, res) => {
+router.post("/reset-password", slidingAuthLimiter, async (req, res) => {
   try {
     const schema = z.object({
       email:       z.string().email().toLowerCase().trim(),
@@ -323,28 +479,19 @@ router.post("/reset-password", authLimiter, async (req, res) => {
 
     const { email, otp, newPassword } = parsed.data;
 
-    const [users] = await db.query(
-      "SELECT id, otp, otp_expires_at FROM users WHERE email = ?",
-      [email]
-    );
+    const [users] = await db.query("SELECT id FROM users WHERE email = ?", [email]);
     if (!users.length) return res.status(400).json({ message: "Invalid request" });
-
     const user = users[0];
-    if (!user.otp || !user.otp_expires_at) {
-      return res.status(400).json({ message: "No OTP was requested for this account" });
-    }
-    if (new Date(user.otp_expires_at) < new Date()) {
-      return res.status(400).json({ message: "OTP has expired. Please request a new one." });
-    }
 
-    const otpValid = await bcrypt.compare(otp, user.otp);
-    if (!otpValid) return res.status(400).json({ message: "Invalid OTP" });
+    const result = await verifyOtp(user.id, OTP_PURPOSES.PASSWORD_RESET, otp);
+    if (!result.valid) {
+      return res.status(400).json({
+        message: result.reason === "EXPIRED" ? "OTP has expired. Please request a new one." : "Invalid OTP",
+      });
+    }
 
     const hashedPassword = await bcrypt.hash(newPassword, 12);
-    await db.query(
-      "UPDATE users SET password = ?, otp = NULL, otp_expires_at = NULL WHERE id = ?",
-      [hashedPassword, user.id]
-    );
+    await db.query("UPDATE users SET password = ? WHERE id = ?", [hashedPassword, user.id]);
 
     return res.json({ message: "Password reset successfully. Please log in." });
   } catch (err) {

@@ -1,32 +1,27 @@
 // src/backend/routes/me.js
+// ─────────────────────────────────────────────────────────────
+// Fixed in this pass: this file used to define its own local
+// `authenticate` middleware that only checked the Authorization
+// header. That meant any caller using the httpOnly cookie (which
+// src/lib/api.ts's `authApi` does, with credentials:"include" and
+// no Authorization header at all) got a 401 here even while fully
+// logged in elsewhere in the app. Now uses the shared requireAuth
+// from middleware/auth.js, which accepts either the cookie or the
+// header — matching how the rest of the backend authenticates.
+// ─────────────────────────────────────────────────────────────
 import express from "express";
-import jwt from "jsonwebtoken";
 import { z } from "zod";
 import db from "../db.js";
+import { requireAuth } from "../middleware/auth.js";
 
 const router = express.Router();
 
-// ── Auth middleware ──────────────────────────────────────────
-// Local alias kept so existing callers of this file still work.
-// The canonical version (with cookie support) lives in middleware/auth.js.
-export const authenticate = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith("Bearer ")) {
-    return res.status(401).json({ message: "No token provided" });
-  }
-
-  const token = authHeader.split(" ")[1];
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.userId = decoded.id;
-    next();
-  } catch {
-    return res.status(401).json({ message: "Invalid or expired token" });
-  }
-};
+// Kept as a named export for backward compatibility with any other
+// file that might still import { authenticate } from here.
+export const authenticate = requireAuth;
 
 // ── GET /me ──────────────────────────────────────────────────
-router.get("/me", authenticate, async (req, res) => {
+router.get("/me", requireAuth, async (req, res) => {
   try {
     const [userRows] = await db.query(
       `SELECT
@@ -37,7 +32,7 @@ router.get("/me", authenticate, async (req, res) => {
          CASE WHEN password = '' OR password IS NULL THEN 0 ELSE 1 END AS has_password
        FROM users
        WHERE id = ?`,
-      [req.userId]
+      [req.user.id]
     );
 
     if (!userRows.length) {
@@ -48,15 +43,25 @@ router.get("/me", authenticate, async (req, res) => {
       `SELECT provider, provider_email, linked_at
        FROM user_providers
        WHERE user_id = ?`,
-      [req.userId]
+      [req.user.id]
     );
 
     const user = userRows[0];
+    let verificationStatus;
+
+    if (user.role === "recruiter") {
+      const [[profile]] = await db.query(
+        "SELECT verification_status FROM recruiter_profiles WHERE user_id = ?",
+        [req.user.id]
+      );
+      verificationStatus = profile?.verification_status; // 'pending' | 'approved' | 'rejected'
+    }
 
     res.json({
       user: {
         ...user,
         has_password: !!user.has_password,
+        verificationStatus,
         providers: providers.map((p) => ({
           name: p.provider,
           email: p.provider_email,
@@ -76,7 +81,7 @@ const updateMeSchema = z.object({
   avatar: z.string().nullable().optional(),
 });
 
-router.patch("/me", authenticate, async (req, res) => {
+router.patch("/me", requireAuth, async (req, res) => {
   try {
     const parsed = updateMeSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -107,7 +112,7 @@ router.patch("/me", authenticate, async (req, res) => {
       return res.status(400).json({ message: "No valid fields to update" });
     }
 
-    values.push(req.userId);
+    values.push(req.user.id);
     await db.query(`UPDATE users SET ${fields.join(", ")} WHERE id = ?`, values);
 
     const [userRows] = await db.query(
@@ -119,14 +124,14 @@ router.patch("/me", authenticate, async (req, res) => {
          CASE WHEN password = '' OR password IS NULL THEN 0 ELSE 1 END AS has_password
        FROM users
        WHERE id = ?`,
-      [req.userId]
+      [req.user.id]
     );
 
     const [providers] = await db.query(
       `SELECT provider, provider_email, linked_at
        FROM user_providers
        WHERE user_id = ?`,
-      [req.userId]
+      [req.user.id]
     );
 
     const user = userRows[0];
@@ -149,35 +154,28 @@ router.patch("/me", authenticate, async (req, res) => {
 });
 
 // ── DELETE /providers/:provider ──────────────────────────────
-router.delete("/providers/:provider", authenticate, async (req, res) => {
+router.delete("/providers/:provider", requireAuth, async (req, res) => {
   try {
     const { provider } = req.params;
 
-    const [userRows] = await db.query(
-      `SELECT password FROM users WHERE id = ?`,
-      [req.userId]
-    );
-
+    const [userRows] = await db.query(`SELECT password FROM users WHERE id = ?`, [req.user.id]);
     const [allProviders] = await db.query(
       `SELECT provider FROM user_providers WHERE user_id = ?`,
-      [req.userId]
+      [req.user.id]
     );
 
-    const hasPassword =
-      !!userRows[0]?.password && userRows[0].password !== "";
-
+    const hasPassword = !!userRows[0]?.password && userRows[0].password !== "";
     const otherProviders = allProviders.filter((p) => p.provider !== provider);
 
     if (!hasPassword && otherProviders.length === 0) {
       return res.status(400).json({
-        message:
-          "Cannot unlink your only sign-in method. Set a password first.",
+        message: "Cannot unlink your only sign-in method. Set a password first.",
       });
     }
 
     await db.query(
       `DELETE FROM user_providers WHERE user_id = ? AND provider = ?`,
-      [req.userId, provider]
+      [req.user.id, provider]
     );
 
     res.json({ message: `${provider} unlinked successfully` });
@@ -188,10 +186,10 @@ router.delete("/providers/:provider", authenticate, async (req, res) => {
 });
 
 // ── DELETE /me ───────────────────────────────────────────────
-router.delete("/me", authenticate, async (req, res) => {
+router.delete("/me", requireAuth, async (req, res) => {
   try {
-    // FK cascade handles user_providers, user_sessions, audit_logs
-    await db.query(`DELETE FROM users WHERE id = ?`, [req.userId]);
+    // FK cascade handles user_providers, applications, jobs, etc.
+    await db.query(`DELETE FROM users WHERE id = ?`, [req.user.id]);
     res.json({ message: "Account deleted successfully" });
   } catch (err) {
     console.error("DELETE /me error:", err);
@@ -199,11 +197,34 @@ router.delete("/me", authenticate, async (req, res) => {
   }
 });
 
-
 // ── Candidate profile (student recruiter-visibility) ─────────
 // Students fill this in so recruiters can find and match them.
 // Nothing here is visible to anyone unless is_visible_to_recruiters
 // is true AND the student has explicitly set it.
+//
+// Naukri-style expansion (this pass): workExperience / education /
+// projects / preferredLocations — each a small array of free-form
+// objects, stored as JSON exactly like `skills` already was.
+
+const experienceEntry = z.object({
+  title: z.string().max(150),
+  company: z.string().max(150),
+  startDate: z.string().max(20).optional(),
+  endDate: z.string().max(20).optional(),
+  description: z.string().max(1000).optional(),
+});
+const educationEntry = z.object({
+  degree: z.string().max(150),
+  institution: z.string().max(200),
+  startYear: z.string().max(10).optional(),
+  endYear: z.string().max(10).optional(),
+});
+const projectEntry = z.object({
+  title: z.string().max(150),
+  description: z.string().max(1000).optional(),
+  url: z.string().url().optional().or(z.literal("")),
+  techStack: z.array(z.string().max(40)).max(20).optional(),
+});
 
 const candidateProfileSchema = z.object({
   fullName:              z.string().max(150).trim().optional(),
@@ -218,24 +239,40 @@ const candidateProfileSchema = z.object({
   expectedSalary:        z.string().max(50).trim().optional(),
   noticePeriod:          z.string().max(50).trim().optional(),
   skills:                z.array(z.string().max(60).trim()).max(40).optional(),
+  workExperience:        z.array(experienceEntry).max(20).optional(),
+  education:             z.array(educationEntry).max(10).optional(),
+  projects:              z.array(projectEntry).max(20).optional(),
+  preferredLocations:    z.array(z.string().max(100)).max(10).optional(),
   isVisibleToRecruiters: z.boolean().optional(),
 });
 
-router.get("/me/candidate-profile", authenticate, async (req, res) => {
+const parseJsonArray = (raw) => {
+  try {
+    const val = JSON.parse(raw || "[]");
+    return Array.isArray(val) ? val : [];
+  } catch {
+    return [];
+  }
+};
+
+router.get("/me/candidate-profile", requireAuth, async (req, res) => {
   try {
     const [rows] = await db.query(
       // `current_role` is a reserved word in TiDB/MySQL — must be backticked
       // in every SELECT, INSERT, and UPDATE that references this column.
       `SELECT full_name, phone, location, linkedin_url, github_url,
               portfolio_url, years_of_experience, \`current_role\`, current_company,
-              expected_salary, notice_period, skills, is_visible_to_recruiters
+              expected_salary, notice_period, skills,
+              work_experience, education, projects, preferred_locations,
+              is_visible_to_recruiters
        FROM candidate_profiles WHERE user_id = ?`,
-      [req.userId]
+      [req.user.id]
     );
     if (rows.length === 0) {
-      // Return an empty profile shape rather than 404 so the frontend
-      // doesn't need to handle both "no row yet" and "row exists" cases.
-      return res.json({ exists: false, isVisibleToRecruiters: false, skills: [] });
+      return res.json({
+        exists: false, isVisibleToRecruiters: false,
+        skills: [], workExperience: [], education: [], projects: [], preferredLocations: [],
+      });
     }
     const row = rows[0];
     return res.json({
@@ -251,7 +288,11 @@ router.get("/me/candidate-profile", authenticate, async (req, res) => {
       currentCompany:        row.current_company,
       expectedSalary:        row.expected_salary,
       noticePeriod:          row.notice_period,
-      skills: (() => { try { return JSON.parse(row.skills || "[]"); } catch { return []; } })(),
+      skills:                parseJsonArray(row.skills),
+      workExperience:        parseJsonArray(row.work_experience),
+      education:             parseJsonArray(row.education),
+      projects:              parseJsonArray(row.projects),
+      preferredLocations:    parseJsonArray(row.preferred_locations),
       isVisibleToRecruiters: !!row.is_visible_to_recruiters,
     });
   } catch (err) {
@@ -260,7 +301,7 @@ router.get("/me/candidate-profile", authenticate, async (req, res) => {
   }
 });
 
-router.patch("/me/candidate-profile", authenticate, async (req, res) => {
+router.patch("/me/candidate-profile", requireAuth, async (req, res) => {
   try {
     const parsed = candidateProfileSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -270,6 +311,7 @@ router.patch("/me/candidate-profile", authenticate, async (req, res) => {
       });
     }
     const d = parsed.data;
+    const j = (v) => (v ? JSON.stringify(v) : null);
 
     // Upsert — creates the row if it doesn't exist yet.
     // `current_role` is backticked in the INSERT column list and in both
@@ -278,8 +320,10 @@ router.patch("/me/candidate-profile", authenticate, async (req, res) => {
       `INSERT INTO candidate_profiles
          (user_id, full_name, phone, location, linkedin_url, github_url,
           portfolio_url, years_of_experience, \`current_role\`, current_company,
-          expected_salary, notice_period, skills, is_visible_to_recruiters)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          expected_salary, notice_period, skills,
+          work_experience, education, projects, preferred_locations,
+          is_visible_to_recruiters)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
          full_name               = COALESCE(?, full_name),
          phone                   = COALESCE(?, phone),
@@ -293,21 +337,25 @@ router.patch("/me/candidate-profile", authenticate, async (req, res) => {
          expected_salary         = COALESCE(?, expected_salary),
          notice_period           = COALESCE(?, notice_period),
          skills                  = COALESCE(?, skills),
+         work_experience         = COALESCE(?, work_experience),
+         education               = COALESCE(?, education),
+         projects                = COALESCE(?, projects),
+         preferred_locations     = COALESCE(?, preferred_locations),
          is_visible_to_recruiters = COALESCE(?, is_visible_to_recruiters)`,
       [
-        req.userId,
+        req.user.id,
         d.fullName ?? null, d.phone ?? null, d.location ?? null,
         d.linkedinUrl || null, d.githubUrl || null, d.portfolioUrl || null,
         d.yearsOfExperience ?? null, d.currentRole ?? null, d.currentCompany ?? null,
         d.expectedSalary ?? null, d.noticePeriod ?? null,
-        d.skills ? JSON.stringify(d.skills) : null,
+        j(d.skills), j(d.workExperience), j(d.education), j(d.projects), j(d.preferredLocations),
         d.isVisibleToRecruiters ?? null,
         // ON DUPLICATE KEY values (same order as UPDATE clause above)
         d.fullName ?? null, d.phone ?? null, d.location ?? null,
         d.linkedinUrl || null, d.githubUrl || null, d.portfolioUrl || null,
         d.yearsOfExperience ?? null, d.currentRole ?? null, d.currentCompany ?? null,
         d.expectedSalary ?? null, d.noticePeriod ?? null,
-        d.skills ? JSON.stringify(d.skills) : null,
+        j(d.skills), j(d.workExperience), j(d.education), j(d.projects), j(d.preferredLocations),
         d.isVisibleToRecruiters ?? null,
       ]
     );
@@ -317,6 +365,5 @@ router.patch("/me/candidate-profile", authenticate, async (req, res) => {
     return res.status(500).json({ message: "Server error" });
   }
 });
-
 
 export default router;
