@@ -95,6 +95,35 @@ export function requireRole(...roles) {
 export const requireRecruiter = requireRole("recruiter", "admin");
 export const requireAdmin = requireRole("admin");
 
+// ── Verified-recruiter check (shared logic) ────────────────────
+// Returns null if the recruiter (identified by userId) is clear to
+// proceed, or the verification_status string ('pending'|'rejected')
+// if not. Returns undefined if they have no recruiter_profiles row
+// at all yet.
+async function getRecruiterVerificationStatus(userId) {
+  const [rows] = await db.query(
+    "SELECT verification_status FROM recruiter_profiles WHERE user_id = ?",
+    [userId]
+  );
+  return rows.length ? rows[0].verification_status : undefined;
+}
+
+function verificationBlockResponse(verification_status) {
+  if (verification_status === undefined) {
+    return { status: 404, body: { message: "Recruiter profile not found. Please complete your profile first." } };
+  }
+  return {
+    status: 403,
+    body: {
+      message:
+        verification_status === "rejected"
+          ? "Your recruiter account verification was rejected. Please re-upload a valid document."
+          : "Your recruiter account is pending verification. This action will be available once approved.",
+      verificationStatus: verification_status,
+    },
+  };
+}
+
 // ── Verified-recruiter guard ──────────────────────────────────
 // Must run AFTER requireAuth + requireRole("recruiter"). Blocks
 // recruiters whose company hasn't been approved yet (see
@@ -108,32 +137,29 @@ export async function requireVerifiedRecruiter(req, res, next) {
   if (req.user.role === "admin") return next();
 
   try {
-    const [rows] = await db.query(
-      "SELECT verification_status FROM recruiter_profiles WHERE user_id = ?",
-      [req.user.id]
-    );
-
-    if (!rows.length) {
-      return res.status(404).json({ message: "Recruiter profile not found. Please complete your profile first." });
-    }
-
-    const { verification_status } = rows[0];
-
+    const verification_status = await getRecruiterVerificationStatus(req.user.id);
     if (verification_status !== "approved") {
-      return res.status(403).json({
-        message:
-          verification_status === "rejected"
-            ? "Your recruiter account verification was rejected. Please re-upload a valid document."
-            : "Your recruiter account is pending verification. This action will be available once approved.",
-        verificationStatus: verification_status,
-      });
+      const blocked = verificationBlockResponse(verification_status);
+      return res.status(blocked.status).json(blocked.body);
     }
-
     next();
   } catch (err) {
     console.error("[requireVerifiedRecruiter]", err);
     return res.status(500).json({ message: "Server error" });
   }
+}
+
+// Same check, but callable inline for routes where verification should
+// only gate SOME requests — e.g. saving a job as a draft is allowed
+// pre-verification (see routes/jobs.js POST /), but the same request
+// setting is_active/publish:true is a publish action and isn't. Returns
+// null when clear to proceed, or an { status, body } pair to send back
+// when blocked. Admins bypass.
+export async function checkRecruiterVerified(req) {
+  if (req.user.role === "admin") return null;
+  const verification_status = await getRecruiterVerificationStatus(req.user.id);
+  if (verification_status === "approved") return null;
+  return verificationBlockResponse(verification_status);
 }
 
 // ── Optional auth (attaches user if token is valid, doesn't block) ──

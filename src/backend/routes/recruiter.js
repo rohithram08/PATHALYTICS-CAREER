@@ -3,6 +3,19 @@
 // Recruiter dashboard API
 //
 // All routes require: requireAuth + requireRecruiter
+// Routes that expose or contact candidates (resume downloads, candidate
+// lists/details, messaging, talent pool, analytics) and routes that create
+// public-facing content (posting/editing/deleting a job) additionally
+// require requireVerifiedRecruiter — added in this pass. Previously this
+// router never imported/applied requireVerifiedRecruiter at all, so any
+// account with role='recruiter' — including one that just signed up two
+// seconds ago with a generic email and is sitting in verification_status
+// 'pending' or 'rejected' — could already list/download every candidate's
+// resume and message any user. requireRecruiter only checks role, not
+// verification status; requireVerifiedRecruiter is the actual gate.
+// GET /profile, PUT /profile, GET/POST/DELETE /documents, and GET /jobs
+// (listing your own drafts) stay open pre-verification on purpose —
+// documents/upload IS how a recruiter gets verified in the first place.
 //
 // ── Fixed in this pass (schema drift audit) ───────────────────
 // Every query in this file previously referenced a `job_postings`
@@ -31,7 +44,7 @@ import path from "path";
 import fs from "fs";
 import { z } from "zod";
 import db from "../db.js";
-import { requireAuth, requireRecruiter } from "../middleware/auth.js";
+import { requireAuth, requireRecruiter, requireVerifiedRecruiter, checkRecruiterVerified } from "../middleware/auth.js";
 import { upload, validateUploadedFile, cleanupUpload } from "../middleware/upload.js";
 import { uploadLimiter } from "../middleware/security.js";
 import { checkStatusTransition, RECRUITER_SETTABLE_STATUSES } from "../utils/atsTransitions.js";
@@ -256,6 +269,15 @@ router.post("/jobs", async (req, res) => {
     }
     const data = parsed.data;
 
+    // Drafting doesn't require verification (a recruiter shouldn't be
+    // locked out while their documents are under review) — but publishing
+    // does, same rule routes/jobs.js's /publish enforces. is_active:true
+    // here is the equivalent of that publish action, just in one step.
+    if (data.is_active) {
+      const blocked = await checkRecruiterVerified(req);
+      if (blocked) return res.status(blocked.status).json(blocked.body);
+    }
+
     const [result] = await db.query(
       `INSERT INTO jobs
          (recruiter_id, title, description, location, job_type, experience_level,
@@ -297,6 +319,13 @@ router.put("/jobs/:id", async (req, res) => {
       return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten().fieldErrors });
     }
     const d = parsed.data;
+
+    // Same rule as POST /jobs above: only the publish action (is_active
+    // flipping to true) requires a verified account.
+    if (d.is_active === true) {
+      const blocked = await checkRecruiterVerified(req);
+      if (blocked) return res.status(blocked.status).json(blocked.body);
+    }
 
     const updates = { updated_at: new Date() };
     if (d.title !== undefined) updates.title = d.title;
@@ -340,7 +369,7 @@ router.delete("/jobs/:id", async (req, res) => {
 // ── GET /candidates ──────────────────────────────────────────
 // Branches on the presence of `page` (always sent by RecruiterCandidates.tsx,
 // never sent by CandidatesList.tsx) — see file header note.
-router.get("/candidates", async (req, res) => {
+router.get("/candidates", requireVerifiedRecruiter, async (req, res) => {
   const isPipelineMode = req.query.page !== undefined || req.query.stage !== undefined;
   if (isPipelineMode) return handlePipelineCandidates(req, res);
   return handleDirectoryCandidates(req, res);
@@ -438,7 +467,7 @@ async function handleDirectoryCandidates(req, res) {
 // ── GET /candidates/match/:jobId — NEW ─────────────────────────
 // Simple, explainable skill-overlap ranking (not an opaque "AI match") —
 // ranks opted-in candidates by how many of the job's listed skills they share.
-router.get("/candidates/match/:jobId", async (req, res) => {
+router.get("/candidates/match/:jobId", requireVerifiedRecruiter, async (req, res) => {
   try {
     const [jobRows] = await db.query(
       "SELECT id, title, skills FROM jobs WHERE id = ? AND recruiter_id = ?",
@@ -480,7 +509,7 @@ router.get("/candidates/match/:jobId", async (req, res) => {
 });
 
 // ── GET /candidates/:id ───────────────────────────────────────
-router.get("/candidates/:id", async (req, res) => {
+router.get("/candidates/:id", requireVerifiedRecruiter, async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT a.id AS application_id, a.status AS stage, a.cover_note AS notes,
@@ -503,7 +532,7 @@ router.get("/candidates/:id", async (req, res) => {
 });
 
 // ── POST /candidates/:id/status ─────────────────────────────────
-router.post("/candidates/:id/status", async (req, res) => {
+router.post("/candidates/:id/status", requireVerifiedRecruiter, async (req, res) => {
   try {
     const parsed = candidateStatusSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -565,7 +594,7 @@ router.post("/candidates/:id/status", async (req, res) => {
 });
 
 // ── GET /analytics ────────────────────────────────────────────
-router.get("/analytics", async (req, res) => {
+router.get("/analytics", requireVerifiedRecruiter, async (req, res) => {
   try {
     const { days = 30 } = req.query;
     const recruiterUserId = req.user.id;
@@ -619,7 +648,7 @@ router.get("/analytics", async (req, res) => {
 });
 
 // ── GET /talent-pool ──────────────────────────────────────────
-router.get("/talent-pool", async (req, res) => {
+router.get("/talent-pool", requireVerifiedRecruiter, async (req, res) => {
   try {
     const [saved] = await db.query(
       `SELECT u.id, u.name, u.email, u.avatar_url,
@@ -638,7 +667,7 @@ router.get("/talent-pool", async (req, res) => {
 });
 
 // ── POST /talent-pool/:userId ─────────────────────────────────
-router.post("/talent-pool/:userId", async (req, res) => {
+router.post("/talent-pool/:userId", requireVerifiedRecruiter, async (req, res) => {
   try {
     const notes = (req.body.notes || "").slice(0, 1000);
     await db.query(
@@ -669,7 +698,7 @@ router.delete("/talent-pool/:userId", async (req, res) => {
 });
 
 // ── POST /messages ────────────────────────────────────────────
-router.post("/messages", async (req, res) => {
+router.post("/messages", requireVerifiedRecruiter, async (req, res) => {
   try {
     const parsed = messageSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -815,7 +844,7 @@ router.delete("/documents/:id", async (req, res) => {
 });
 
 // ── GET /resumes/:appId/download — NEW ──────────────────────────
-router.get("/resumes/:appId/download", async (req, res) => {
+router.get("/resumes/:appId/download", requireVerifiedRecruiter, async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT a.resume_storage_key, u.name AS candidate_name

@@ -6,7 +6,7 @@ import path from "path";
 import fs from "fs";
 import { z } from "zod";
 import db from "../db.js";
-import { requireAuth, requireRole } from "../middleware/auth.js";
+import { requireAuth, requireRole, requireVerifiedRecruiter } from "../middleware/auth.js";
 import { requireOwnJob } from "./jobs.js";
 import { sendNotification } from "../utils/emailService.js";
 import { checkStatusTransition, RECRUITER_SETTABLE_STATUSES } from "../utils/atsTransitions.js";
@@ -253,6 +253,7 @@ router.get(
   requireAuth,
   requireRole("recruiter"),
   requireOwnJob,
+  requireVerifiedRecruiter,
   async (req, res) => {
     try {
       const [rows] = await db.query(
@@ -275,7 +276,7 @@ router.get(
 );
 
 // ── Recruiter: move a candidate to a new status and/or pipeline stage ─
-router.patch("/:id/status", requireAuth, requireRole("recruiter"), async (req, res) => {
+router.patch("/:id/status", requireAuth, requireRole("recruiter"), requireVerifiedRecruiter, async (req, res) => {
   try {
     const schema = z
       .object({

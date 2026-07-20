@@ -116,17 +116,40 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const fetchUserProfile = useCallback(
     async (authToken: string) => {
+      let res: Response;
       try {
-        const res = await fetch(`${API_URL}/api/auth/me`, {
+        res = await fetch(`${API_URL}/api/auth/me`, {
+          credentials: "include", // cookie rides along as a backup to the header
           headers: {
             Authorization: `Bearer ${authToken}`,
           },
         });
+      } catch {
+        // Network-level failure (offline, backend cold-starting, etc.) is not
+        // proof the token is invalid — keep the user signed in using what the
+        // token itself tells us rather than logging them out over a blip.
+        setUser(getUserFromToken(authToken));
+        return;
+      }
 
-        if (!res.ok) {
-          throw new Error("Unable to fetch profile");
-        }
+      if (res.status === 401) {
+        // The backend explicitly said this token is dead (expired/invalid).
+        // Previously this case fell into the same catch-all as a network
+        // error and just kept showing stale decoded-token data — the user
+        // looked "logged in" while every real API call kept 401ing under
+        // them. Log out for real instead.
+        clearAuth();
+        return;
+      }
 
+      if (!res.ok) {
+        // Some other server-side hiccup (500, a bad response mid cold-start).
+        // Not proof the token is invalid either, so don't force a logout.
+        setUser(getUserFromToken(authToken));
+        return;
+      }
+
+      try {
         const data = await res.json();
         const profile = data?.user || data;
 
@@ -136,6 +159,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (profile.role === "recruiter") {
           try {
             const rRes = await fetch(`${API_URL}/api/recruiter/profile`, {
+              credentials: "include",
               headers: { Authorization: `Bearer ${authToken}` },
             });
             if (rRes.ok) {
@@ -148,7 +172,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           } catch { /* non-fatal — fall through with profile only */ }
         }
 
-
         setUser((prev) => ({
           ...prev,
           ...profile,
@@ -156,11 +179,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           ...recruiterData,
         }));
       } catch {
-        const decodedUser = getUserFromToken(authToken);
-        setUser(decodedUser);
+        setUser(getUserFromToken(authToken));
       }
     },
-    []
+    [clearAuth]
   );
 
   const login = useCallback(
@@ -203,6 +225,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       try {
         const res = await fetch(`${API_URL}/api/auth/me`, {
           method: "PATCH",
+          credentials: "include",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
@@ -260,6 +283,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     bootstrap();
   }, [clearAuth, fetchUserProfile]);
 
+  // src/lib/api.ts dispatches this on every 401 it sees from any endpoint.
+  // Previously nothing listened for it, so a token that died mid-session
+  // (expired, revoked, etc.) only got caught the next time the page was
+  // reloaded — until then the UI kept acting as if the user was still
+  // logged in while every api.ts call quietly failed.
+  useEffect(() => {
+    const handleUnauthorized = () => clearAuth();
+    window.addEventListener("auth:unauthorized", handleUnauthorized);
+    return () => window.removeEventListener("auth:unauthorized", handleUnauthorized);
+  }, [clearAuth]);
+
   const isRecruiter = user?.role === "recruiter";
   const isVerifiedRecruiter = isRecruiter && user?.verificationStatus === "approved";
 
@@ -267,7 +301,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     () => ({
       user,
       token,
-      isAuthenticated: !!token,
+      // !!token alone breaks OAuth sign-in: OAuthSuccess.tsx intentionally
+      // has no JWT to store client-side (the backend only sets an httpOnly
+      // cookie for that flow, by design — see routes/oauth.js), so relying
+      // on token truthiness left OAuth users looking "signed in" for one
+      // frame and then bounced straight back to /login by every guard.
+      // A populated user object (fetched via the cookie) is just as valid
+      // a signal that the session is real.
+      isAuthenticated: !!token || !!user,
       isLoading,
       isRecruiter,
       isVerifiedRecruiter,

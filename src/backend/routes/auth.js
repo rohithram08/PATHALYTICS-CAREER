@@ -140,10 +140,18 @@ function signToken(payload) {
 }
 
 function setAuthCookie(res, token) {
+  // sameSite MUST be "none" in production: the frontend (Vercel) and this
+  // API (Render) are on different domains, so every request between them is
+  // cross-site. "strict" (and even "lax" for non-GET/XHR) cookies are never
+  // attached by the browser on a cross-site request — the cookie would get
+  // set on login/signup but silently stop being sent on the very next call.
+  // "none" requires secure:true, which is already true whenever NODE_ENV is
+  // production, so the pairing stays valid. In dev (same-origin-ish,
+  // http://localhost) "lax" + not-secure is fine and simpler to work with.
   res.cookie("token", token, {
     httpOnly: true,
     secure:   process.env.NODE_ENV === "production",
-    sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
     maxAge:   24 * 60 * 60 * 1000,   // 1 day
     path:     "/",
   });
@@ -325,7 +333,7 @@ router.post("/logout", (req, res) => {
   res.clearCookie("token", {
     httpOnly: true,
     secure:   process.env.NODE_ENV === "production",
-    sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
     path:     "/",
   });
   res.json({ message: "Logged out successfully" });

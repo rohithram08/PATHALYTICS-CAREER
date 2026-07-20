@@ -62,7 +62,13 @@ function setAuthCookie(res, user) {
   res.cookie("token", token, {
     httpOnly: true,                                    // NOT accessible by JS
     secure: process.env.NODE_ENV === "production",    // HTTPS only in prod
-    sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
+    // "none" in prod: frontend (Vercel) and this API (Render) are different
+    // domains, so this is always a cross-site request from the browser's
+    // point of view. "strict" cookies are never sent cross-site — this
+    // cookie would get set right after the OAuth redirect and then never
+    // be attached to a single fetch() call afterwards. See routes/auth.js
+    // setAuthCookie for the same fix with the fuller explanation.
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
     maxAge: 7 * 24 * 60 * 60 * 1000,                 // 7 days
     path: "/",
   });

@@ -11,6 +11,7 @@
 // ─────────────────────────────────────────────────────────────
 import express from "express";
 import { z } from "zod";
+import bcrypt from "bcryptjs";
 import db from "../db.js";
 import { requireAuth } from "../middleware/auth.js";
 
@@ -186,10 +187,54 @@ router.delete("/providers/:provider", requireAuth, async (req, res) => {
 });
 
 // ── DELETE /me ───────────────────────────────────────────────
+// This is the account-deletion endpoint the frontend actually calls
+// (Settings.tsx → DELETE /api/auth/me). Previously this just deleted on
+// requireAuth alone — a stolen/leftover session token, with no further
+// confirmation, was enough to permanently destroy the account. Now it
+// re-checks the password for accounts that have one (the same standard
+// bcrypt.compare pattern used everywhere else in this backend), blocks
+// self-deleting an admin account, and clears the cookie afterward so a
+// stale token doesn't linger client-side pointing at a deleted user.
+const deleteAccountSchema = z.object({ password: z.string().optional() });
+
 router.delete("/me", requireAuth, async (req, res) => {
   try {
+    const parsed = deleteAccountSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ message: "Invalid request" });
+    }
+
+    const [rows] = await db.query("SELECT password, role FROM users WHERE id = ?", [req.user.id]);
+    if (!rows.length) return res.status(404).json({ message: "User not found" });
+
+    if (rows[0].role === "admin") {
+      return res.status(403).json({ message: "Admin accounts cannot be self-deleted" });
+    }
+
+    const hasPassword = !!rows[0].password;
+    if (hasPassword) {
+      if (!parsed.data.password) {
+        return res.status(400).json({ message: "Password is required to delete your account" });
+      }
+      const valid = await bcrypt.compare(parsed.data.password, rows[0].password);
+      if (!valid) {
+        return res.status(400).json({ message: "Incorrect password" });
+      }
+    }
+    // OAuth-only accounts (has_password false) have no password to check
+    // against — the confirmation dialog + valid session is what's available
+    // for those accounts.
+
     // FK cascade handles user_providers, applications, jobs, etc.
     await db.query(`DELETE FROM users WHERE id = ?`, [req.user.id]);
+
+    res.clearCookie("token", {
+      httpOnly: true,
+      secure:   process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      path:     "/",
+    });
+
     res.json({ message: "Account deleted successfully" });
   } catch (err) {
     console.error("DELETE /me error:", err);
