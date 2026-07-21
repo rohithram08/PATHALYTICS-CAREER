@@ -1,18 +1,29 @@
 // src/lib/api.ts
 // ─────────────────────────────────────────────────────────────
-// Secure API client — cookie-based authentication
+// API client — sends BOTH the httpOnly cookie and an Authorization
+// header, and doesn't depend on either one exclusively.
 //
-// OLD: read token from localStorage('token'), put in header
-// NEW: always send credentials: "include" so browser auto-
-//      sends the httpOnly cookie on every request.
-//      No token ever touches JavaScript code.
+// Why both: this app's frontend (Vercel) and backend (Render) are on
+// different domains, so every request between them is cross-site.
+// A cross-site cookie only survives if it's set with SameSite=None
+// (now fixed backend-side in routes/auth.js / oauth.js), and even
+// then it's one more thing that can silently break (browser privacy
+// settings, third-party-cookie blocking, etc). The Authorization
+// header has no such caveats — it's just a value we attach ourselves
+// — so it's the reliable primary path; the cookie rides along as a
+// backup. The backend's requireAuth already checks the cookie first
+// and falls back to the header (src/backend/middleware/auth.js), so
+// sending both is always safe and never ambiguous.
 //
-// The mismatch bug is also fixed: old AuthContext wrote to
-// 'pathalytics_token' but this file read 'token' → silent
-// auth failures. Now there's no localStorage involved at all.
+// This also fixes the earlier split-brain bug where this file was
+// cookie-only while src/contexts/AuthContext.tsx was header-only —
+// two auth systems that didn't talk to each other. Both now read the
+// same localStorage token, so a signed-in user works no matter which
+// of the two calls a given page happens to use.
 // ─────────────────────────────────────────────────────────────
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+const TOKEN_KEY = "pathalytics_token"; // must match AuthContext.tsx's TOKEN_KEY
 
 export interface ApiUser {
   id: number;
@@ -47,12 +58,16 @@ async function request<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
+  const token = localStorage.getItem(TOKEN_KEY);
+  const callerHeaders = (options.headers as Record<string, string>) || {};
+
   const res = await fetch(`${API_URL}${endpoint}`, {
     ...options,
-    credentials: "include",           // ← sends httpOnly cookie automatically
+    credentials: "include",           // cookie, when it survives the trip
     headers: {
       "Content-Type": "application/json",
-      ...((options.headers as Record<string, string>) || {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}), // reliable primary path
+      ...callerHeaders,
     },
   });
 

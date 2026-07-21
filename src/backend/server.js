@@ -191,16 +191,34 @@ app.use((err, req, res, _next) => {
   });
 });
 
-// ── 12. Export app — start.js is responsible for calling listen() ──
-// (Previously this file ALSO called app.listen() here, in addition to
-// start.js calling it again after importing this module — two servers
-// both trying to bind the same PORT. The second .listen() call throws
-// EADDRINUSE, and an unhandled 'error' event on a net.Server crashes
-// the process by default. One listener, in one place, now.)
+// ── 12. Export app ──────────────────────────────────────────────
+// (Previously this file ALSO called app.listen() unconditionally, in
+// addition to start.js calling it again after importing this module —
+// two servers both trying to bind the same PORT. The second .listen()
+// call throws EADDRINUSE, and an unhandled 'error' event on a
+// net.Server crashes the process by default.)
+//
+// The guard below binds the port here ONLY when this file itself is
+// the process entry point (`node server.js`) — it stays silent when
+// another file imports it (`import app from "./server.js"` in
+// start.js), so the old double-bind bug can't come back. This matters
+// beyond just dev convenience: if a deploy's Start Command ever points
+// at `node server.js` instead of `node start.js` (easy to get wrong,
+// and Render/Railway/etc. won't error on it — the process just never
+// opens a port, DB connects fine, logs look "ready", and the platform
+// times out the deploy waiting for a port scan that never succeeds),
+// this makes the app work either way instead of failing silently.
 if (process.env.NODE_ENV !== "test") {
-  console.log(`✅ Pathalytics API ready (port ${process.env.PORT || 5000} — bound by start.js)`);
+  console.log(`✅ Pathalytics API ready (port ${process.env.PORT || 5000})`);
   console.log(`   Environment : ${process.env.NODE_ENV}`);
   console.log(`   Allowed CORS: ${PROD_ORIGIN} + Vercel previews`);
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const PORT = process.env.PORT || 5000;
+  app.listen(PORT, () =>
+    console.log(`   Bound directly by server.js on port ${PORT} (no start.js in this run)`)
+  );
 }
 
 export default app;

@@ -58,11 +58,17 @@ const OAuthSuccess = () => {
       // There is no token in the URL anymore — that's intentional.
 
       try {
-        // ── CHANGED: authLogin(token) → authLogin("")
-        // authLogin("") still calls fetchUserProfile() inside AuthContext,
-        // which does GET /api/auth/me — the browser sends the httpOnly
-        // cookie automatically, so the server knows who we are.
-        await authLogin("");
+        // There's no JWT to read from the URL — that's intentional (see
+        // header comment). We still pass a non-empty placeholder instead of
+        // "" here: AuthContext's bootstrap() on the next page load checks
+        // `if (!storedToken) return` before it ever calls fetchUserProfile,
+        // so an empty string would make a returning OAuth user look logged
+        // out again after every refresh, cookie or not. Any non-empty,
+        // non-JWT-shaped string works — fetchUserProfile's real
+        // authentication comes from the httpOnly cookie (sent via
+        // credentials:"include"), this placeholder just needs to survive
+        // the various `if (!token)` truthiness checks around the app.
+        await authLogin("oauth-cookie-session");
 
         setStatus("success");
         toast.success("Signed in successfully!");

@@ -102,6 +102,7 @@ const Settings = () => {
   const [notifications, setNotifications] = useState<NotificationPrefs>(DEFAULT_NOTIFS);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
   const [isDragging, setIsDragging] = useState(false);
 
   const [baseline, setBaseline] = useState({
@@ -303,17 +304,30 @@ const Settings = () => {
       return;
     }
 
+    if (user?.has_password && !deletePassword) {
+      toast({
+        title: 'Password required',
+        description: 'Enter your password to confirm account deletion.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setIsDeleting(true);
 
     try {
       const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/me`, {
         method: 'DELETE',
+        credentials: 'include',
         headers: {
+          'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
+        body: JSON.stringify({ password: deletePassword || undefined }),
       });
 
-      if (!res.ok) throw new Error('Delete failed');
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.message || 'Delete failed');
 
       localStorage.removeItem(userKey('profile_image'));
       localStorage.removeItem(userKey(NOTIF_KEY));
@@ -326,16 +340,17 @@ const Settings = () => {
         title: 'Account deleted',
         description: 'Your account has been permanently deleted.',
       });
-    } catch {
+    } catch (error) {
       toast({
         title: 'Delete failed',
-        description: 'Could not delete your account. Please try again.',
+        description: error instanceof Error ? error.message : 'Could not delete your account. Please try again.',
         variant: 'destructive',
       });
     } finally {
+      setDeletePassword('');
       setIsDeleting(false);
     }
-  }, [isDeleting, token, logout, navigate, toast]);
+  }, [isDeleting, token, logout, navigate, toast, user, deletePassword]);
 
   const joinDate = user?.createdAt
     ? new Date(user.createdAt).toLocaleDateString('en-US', {
@@ -629,7 +644,7 @@ const Settings = () => {
                 </p>
               </div>
 
-              <AlertDialog>
+              <AlertDialog onOpenChange={(open) => { if (!open) setDeletePassword(''); }}>
                 <AlertDialogTrigger asChild>
                   <Button variant="destructive" size="sm">
                     <Trash2 className="w-4 h-4 mr-2" />
@@ -646,11 +661,25 @@ const Settings = () => {
                     </AlertDialogDescription>
                   </AlertDialogHeader>
 
+                  {user?.has_password && (
+                    <div className="space-y-2">
+                      <Label htmlFor="delete-account-password">Confirm your password</Label>
+                      <Input
+                        id="delete-account-password"
+                        type="password"
+                        autoComplete="current-password"
+                        value={deletePassword}
+                        onChange={(e) => setDeletePassword(e.target.value)}
+                        placeholder="Enter your password"
+                      />
+                    </div>
+                  )}
+
                   <AlertDialogFooter>
                     <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
                     <AlertDialogAction
                       onClick={handleDeleteAccount}
-                      disabled={isDeleting}
+                      disabled={isDeleting || (user?.has_password && !deletePassword)}
                       className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
                     >
                       {isDeleting ? (
