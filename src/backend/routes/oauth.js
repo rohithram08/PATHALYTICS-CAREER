@@ -31,6 +31,32 @@ const router = express.Router();
 // In production with multiple server instances, use Redis instead
 const oauthStates = new Map();   // state → { createdAt, provider }
 
+// ── One-time OAuth exchange codes ─────────────────────────────
+// The callback redirect can't rely on a cross-site cookie surviving
+// the trip back to the frontend's own fetch() calls: modern browsers
+// increasingly block third-party cookies — a cookie set by this
+// domain, read on a cross-site fetch() initiated from
+// pathalytics.vercel.app — regardless of SameSite=None. That's a
+// separate, newer restriction layer on top of SameSite, and no
+// cookie-attribute tuning gets around it.
+//
+// Instead of putting the JWT itself in the redirect URL (the original
+// security problem this cookie approach was trying to fix — a
+// long-lived token in browser history/referrers/server logs), we
+// redirect with a short-lived, single-use, random opaque code. The
+// frontend immediately POSTs it back and gets the real JWT in a JSON
+// response body — not a cookie, so third-party cookie blocking never
+// enters into it — then uses that token exactly like an email/password
+// login from that point on. The code is useless after ~2 minutes or
+// after one use, so it keeps the same "nothing sensitive sits in the
+// URL for long" property the cookie approach was going for.
+const oauthExchangeCodes = new Map();  // code → { token, createdAt }
+const EXCHANGE_CODE_TTL_MS = 2 * 60 * 1000;
+
+function generateExchangeCode() {
+  return crypto.randomBytes(32).toString("hex");
+}
+
 function generateState() {
   return crypto.randomBytes(32).toString("hex");
 }
@@ -51,6 +77,14 @@ setInterval(() => {
     if (val.createdAt < cutoff) oauthStates.delete(key);
   }
 }, 15 * 60 * 1000);
+
+// Clean up expired exchange codes every minute (short TTL, so check more often)
+setInterval(() => {
+  const cutoff = Date.now() - EXCHANGE_CODE_TTL_MS;
+  for (const [key, val] of oauthExchangeCodes.entries()) {
+    if (val.createdAt < cutoff) oauthExchangeCodes.delete(key);
+  }
+}, 60 * 1000);
 
 // ── JWT cookie helper ─────────────────────────────────────────
 function setAuthCookie(res, user) {
@@ -197,9 +231,12 @@ router.get(
   },
   (req, res) => {
     const { user, action } = req.user;
-    setAuthCookie(res, user);
-    // NO TOKEN IN URL — the cookie carries the auth
-    res.redirect(`${process.env.FRONTEND_URL}/oauth-success?action=${action}`);
+    const token = setAuthCookie(res, user);
+
+    const code = generateExchangeCode();
+    oauthExchangeCodes.set(code, { token, createdAt: Date.now() });
+
+    res.redirect(`${process.env.FRONTEND_URL}/oauth-success?action=${action}&code=${code}`);
   }
 );
 
@@ -232,9 +269,35 @@ router.get(
   },
   (req, res) => {
     const { user, action } = req.user;
-    setAuthCookie(res, user);
-    res.redirect(`${process.env.FRONTEND_URL}/oauth-success?action=${action}`);
+    const token = setAuthCookie(res, user);
+
+    const code = generateExchangeCode();
+    oauthExchangeCodes.set(code, { token, createdAt: Date.now() });
+
+    res.redirect(`${process.env.FRONTEND_URL}/oauth-success?action=${action}&code=${code}`);
   }
 );
+
+// ── Route: exchange a one-time OAuth code for the real JWT ────
+// Called immediately by OAuthSuccess.tsx. Returns the token in the
+// response body (like a normal login) rather than depending on the
+// cookie set during the callback — see the comment on
+// oauthExchangeCodes above for why.
+router.post("/oauth/exchange", (req, res) => {
+  const { code } = req.body || {};
+
+  if (!code || typeof code !== "string" || !oauthExchangeCodes.has(code)) {
+    return res.status(400).json({ message: "Invalid or expired sign-in code. Please try signing in again." });
+  }
+
+  const entry = oauthExchangeCodes.get(code);
+  oauthExchangeCodes.delete(code);   // single-use, regardless of outcome below
+
+  if (Date.now() - entry.createdAt > EXCHANGE_CODE_TTL_MS) {
+    return res.status(400).json({ message: "Sign-in code expired. Please try signing in again." });
+  }
+
+  res.json({ token: entry.token });
+});
 
 export default router;

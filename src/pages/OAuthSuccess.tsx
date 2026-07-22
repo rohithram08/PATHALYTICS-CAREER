@@ -1,26 +1,20 @@
 // src/pages/OAuthSuccess.tsx
 // ─────────────────────────────────────────────────────────────
-// SECURE version — identical UI to your original.
-// Only the security logic changed (2 lines removed, 1 changed).
+// The OAuth callback (routes/oauth.js) redirects here with a
+// short-lived, single-use `code` query param — not a JWT, and not
+// relying on the cookie it also sets. This page immediately exchanges
+// that code for the real JWT via POST /api/auth/oauth/exchange, which
+// returns the token in a JSON response body, then logs in exactly like
+// email/password auth does (authLogin(realToken)).
 //
-// WHAT CHANGED (only these lines):
-//   REMOVED:  const token = searchParams.get("token")
-//   REMOVED:  if (!token) { setStatus("error"); return; }
-//   CHANGED:  await authLogin(token)  →  await authLogin("")
-//
-// WHY:
-//   The old version read the JWT from the URL (?token=eyJ...)
-//   That token was visible in browser history, server logs,
-//   and any analytics script on the page.
-//
-//   The new oauth.js backend sets an httpOnly cookie instead
-//   of putting the token in the URL. So there's no token to
-//   read from the URL anymore — we just call authLogin("") which
-//   triggers fetchUserProfile() and reads the cookie automatically.
-//
-// ZERO changes to AuthContext.tsx function names.
-// ZERO changes to Login.tsx or SignUp.tsx.
-// This file uses { login: authLogin } — exactly like your original.
+// Why not just read the cookie the callback set: that requires a
+// cross-site fetch() from pathalytics.vercel.app to
+// pathalytics-career.onrender.com to actually carry the cookie back,
+// and modern browsers increasingly block that as a third-party cookie
+// regardless of SameSite=None — a separate, newer restriction on top
+// of SameSite that no cookie-attribute tuning gets around. The
+// exchange code sidesteps it: no cookie involved in getting the token
+// to this page, just a normal fetch response body.
 // ─────────────────────────────────────────────────────────────
 
 import { useEffect, useState } from "react";
@@ -31,19 +25,17 @@ import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+
 const OAuthSuccess = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { login: authLogin } = useAuth(); // ← same as your original, no change
+  const { login: authLogin } = useAuth();
 
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
 
   useEffect(() => {
     const finishOAuth = async () => {
-      // ── REMOVED: const token = searchParams.get("token")
-      // The new backend sends NO token in the URL.
-      // It sets an httpOnly cookie during the OAuth callback instead.
-
       const error = searchParams.get("error");
 
       if (error) {
@@ -54,31 +46,44 @@ const OAuthSuccess = () => {
         return;
       }
 
-      // ── REMOVED: if (!token) { setStatus("error"); return; }
-      // There is no token in the URL anymore — that's intentional.
+      const code = searchParams.get("code");
+
+      if (!code) {
+        setStatus("error");
+        toast.error("OAuth failed", {
+          description: "Missing sign-in code. Please try again.",
+        });
+        return;
+      }
 
       try {
-        // There's no JWT to read from the URL — that's intentional (see
-        // header comment). We still pass a non-empty placeholder instead of
-        // "" here: AuthContext's bootstrap() on the next page load checks
-        // `if (!storedToken) return` before it ever calls fetchUserProfile,
-        // so an empty string would make a returning OAuth user look logged
-        // out again after every refresh, cookie or not. Any non-empty,
-        // non-JWT-shaped string works — fetchUserProfile's real
-        // authentication comes from the httpOnly cookie (sent via
-        // credentials:"include"), this placeholder just needs to survive
-        // the various `if (!token)` truthiness checks around the app.
-        await authLogin("oauth-cookie-session");
+        const res = await fetch(`${API_URL}/api/auth/oauth/exchange`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code }),
+        });
+
+        const data = await res.json().catch(() => null);
+
+        if (!res.ok || !data?.token) {
+          throw new Error(data?.message || "Unable to complete sign-in.");
+        }
+
+        // Real JWT now, exactly like email/password login — everything
+        // downstream (AuthContext, api.ts, route guards) works the same
+        // way it already does for a normal login, no cookie required.
+        await authLogin(data.token);
 
         setStatus("success");
         toast.success("Signed in successfully!");
         setTimeout(() => {
           navigate("/dashboard", { replace: true });
         }, 1000);
-      } catch {
+      } catch (err) {
         setStatus("error");
         toast.error("OAuth failed", {
-          description: "Unable to create your session.",
+          description: err instanceof Error ? err.message : "Unable to create your session.",
         });
       }
     };
