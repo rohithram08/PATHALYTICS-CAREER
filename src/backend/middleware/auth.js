@@ -17,6 +17,40 @@ import db from "../db.js";
 const JWT_SECRET = process.env.JWT_SECRET;
 const TOKEN_COOKIE = "token";
 
+// ── Shared cookie options (used by every place that sets/clears the
+// auth cookie: routes/auth.js login+logout, routes/oauth.js, routes/me.js
+// delete-account) ────────────────────────────────────────────────
+// Previously each of those four spots had its own copy of this exact
+// logic, duplicated. That's how a bug like this stays hidden: if one
+// copy doesn't get a fix the others got, whatever flow uses that one
+// copy just quietly breaks, and "wrong cookie flags" produces a 401
+// that looks identical to a dozen unrelated causes.
+//
+// isProd deliberately does NOT use a bare `=== "production"` — trim()
+// + toLowerCase() guard against a stray trailing space or different
+// casing in however NODE_ENV ended up set on the hosting platform,
+// which would otherwise silently select the dev-mode cookie settings
+// (secure:false, sameSite:"lax") in what is actually a real cross-site
+// production deployment. The cookie still gets SET fine in that case —
+// Set-Cookie isn't blocked by SameSite — it just never gets SENT back
+// on the next cross-site request, which is exactly the failure mode
+// this whole cookie rework exists to prevent.
+export function isProdEnv() {
+  return (process.env.NODE_ENV || "").trim().toLowerCase() === "production";
+}
+
+export function authCookieOptions(maxAgeMs) {
+  const isProd = isProdEnv();
+  const opts = {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: isProd ? "none" : "lax",
+    path: "/",
+  };
+  if (maxAgeMs !== undefined) opts.maxAge = maxAgeMs;
+  return opts;
+}
+
 // ── Token extraction ──────────────────────────────────────────
 function extractToken(req) {
   // Prefer httpOnly cookie (secure path)

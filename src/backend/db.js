@@ -309,6 +309,28 @@ const initSchema = async () => {
       );
       await addColumnIfMissing("recruiter_profiles", "verified_at", "DATETIME NULL");
       await addColumnIfMissing("recruiter_profiles", "verified_by", "INT NULL COMMENT 'admin user_id who approved'");
+
+      // Same class of bug users.role had (see the ALTER above): this
+      // table's CREATE statement above is correct, but CREATE TABLE IF
+      // NOT EXISTS only ever runs once. A live table created before
+      // 'approved' existed in this ENUM stays stuck on its original,
+      // narrower definition forever — every insert/update that tries to
+      // write 'approved' (e.g. an auto-approved top/mid-tier domain
+      // signup) then fails with "Data truncated for column
+      // 'verification_status'" at the database level. MODIFY COLUMN
+      // with the same target definition is a safe no-op once it's
+      // already correct, so this is safe to run on every boot.
+      try {
+        await db.query(`
+          ALTER TABLE recruiter_profiles
+          MODIFY COLUMN verification_status
+            ENUM('pending','approved','rejected')
+            DEFAULT 'pending'
+        `);
+        console.log("✅ recruiter_profiles.verification_status column verified/fixed.");
+      } catch (err) {
+        console.error("❌ Failed to fix recruiter_profiles.verification_status column:", err.message);
+      }
     }
 
     // ── jobs ─────────────────────────────────────────────────────

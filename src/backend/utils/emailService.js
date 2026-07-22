@@ -21,6 +21,12 @@ const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
+  // Render's network here has no outbound IPv6 route — Node resolved
+  // smtp.gmail.com to an AAAA (IPv6) record and the connection failed
+  // with ENETUNREACH before ever trying IPv4. Forcing IPv4 sidesteps
+  // that resolution order entirely rather than depending on Node's
+  // (version-dependent) IPv6-then-IPv4 fallback behavior.
+  family: 4,
 });
 
 const FROM = `"Pathalytics" <${process.env.EMAIL_USER}>`;

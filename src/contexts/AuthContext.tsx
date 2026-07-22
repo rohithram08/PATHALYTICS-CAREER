@@ -10,6 +10,11 @@ import {
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 const TOKEN_KEY = "pathalytics_token";
+// src/lib/userStorage.ts (getCurrentUserId/userKey) and HeroSlider.tsx both
+// read this key to scope per-user localStorage data (activity history,
+// saved careers, cached settings) and to check login state. Nothing wrote
+// to it — see the effect below for what that broke.
+const USER_ID_KEY = "pathlytics_user";
 
 export interface AuthUser {
   id?: string;
@@ -110,6 +115,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const clearAuth = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_ID_KEY);
     setToken(null);
     setUser(null);
   }, []);
@@ -293,6 +299,32 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     window.addEventListener("auth:unauthorized", handleUnauthorized);
     return () => window.removeEventListener("auth:unauthorized", handleUnauthorized);
   }, [clearAuth]);
+
+  // Several features outside this context key their own localStorage
+  // entries off this same 'pathlytics_user' key to figure out who's
+  // currently signed in — activity history and saved careers per user
+  // (src/lib/activityTracker.ts, src/lib/savedCareers.ts), cached
+  // profile image / notification prefs (Settings.tsx), and the login
+  // check in HeroSlider.tsx — all via getCurrentUserId() in
+  // src/lib/userStorage.ts. Nothing ever wrote to this key, so
+  // getCurrentUserId() always fell through to its 'guest' fallback for
+  // every single user, meaning that data was effectively shared across
+  // anyone using the same browser regardless of which account was
+  // actually logged in — a fresh signup could see activity history left
+  // behind by whoever used the browser before them. Deriving this from
+  // `user` (rather than decoding the token directly) is deliberate: an
+  // OAuth session's client-side "token" is a placeholder string, not a
+  // real JWT (see login() in OAuthSuccess.tsx), so there'd be nothing
+  // to decode — `user` is populated from the server response either way.
+  // Only a minimal, non-sensitive identifier goes here; the real profile
+  // stays in React state and is never persisted.
+  useEffect(() => {
+    if (user?.id) {
+      localStorage.setItem(USER_ID_KEY, JSON.stringify({ id: user.id, email: user.email }));
+    } else {
+      localStorage.removeItem(USER_ID_KEY);
+    }
+  }, [user?.id, user?.email]);
 
   const isRecruiter = user?.role === "recruiter";
   const isVerifiedRecruiter = isRecruiter && user?.verificationStatus === "approved";

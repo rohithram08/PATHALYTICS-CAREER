@@ -15,6 +15,7 @@
 import dotenv from "dotenv";
 dotenv.config();
 console.log(`[startup] process.env.PORT = ${JSON.stringify(process.env.PORT)} (raw, right after dotenv.config())`);
+console.log(`[startup] process.env.NODE_ENV = ${JSON.stringify(process.env.NODE_ENV)} (raw)`);
 
 import express from "express";
 import cors from "cors";
@@ -41,6 +42,13 @@ import adminRoutes           from "./routes/admin.js";
 import { sanitiseInput } from "./middleware/security.js";
 
 const app = express();
+
+// Render (like Heroku/Railway) terminates TLS at its own edge and proxies
+// to this container over plain HTTP internally. Without this, req.ip,
+// req.secure, and req.protocol all reflect the proxy hop, not the real
+// client — express-rate-limit in particular ends up keying every visitor
+// by the same internal proxy address instead of their real IP.
+app.set("trust proxy", 1);
 
 // ── 1. Security Headers (Helmet) ────────────────────────────
 app.use(

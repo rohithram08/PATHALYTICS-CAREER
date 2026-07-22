@@ -13,7 +13,7 @@ import express from "express";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import db from "../db.js";
-import { requireAuth } from "../middleware/auth.js";
+import { requireAuth, authCookieOptions } from "../middleware/auth.js";
 
 const router = express.Router();
 
@@ -228,12 +228,7 @@ router.delete("/me", requireAuth, async (req, res) => {
     // FK cascade handles user_providers, applications, jobs, etc.
     await db.query(`DELETE FROM users WHERE id = ?`, [req.user.id]);
 
-    res.clearCookie("token", {
-      httpOnly: true,
-      secure:   process.env.NODE_ENV === "production",
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-      path:     "/",
-    });
+    res.clearCookie("token", authCookieOptions());
 
     res.json({ message: "Account deleted successfully" });
   } catch (err) {

@@ -23,6 +23,7 @@ import { Strategy as GitHubStrategy } from "passport-github2";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import db from "../db.js";
+import { authCookieOptions } from "../middleware/auth.js";
 
 const router = express.Router();
 
@@ -59,19 +60,9 @@ function setAuthCookie(res, user) {
     { expiresIn: "7d", algorithm: "HS256" }
   );
 
-  res.cookie("token", token, {
-    httpOnly: true,                                    // NOT accessible by JS
-    secure: process.env.NODE_ENV === "production",    // HTTPS only in prod
-    // "none" in prod: frontend (Vercel) and this API (Render) are different
-    // domains, so this is always a cross-site request from the browser's
-    // point of view. "strict" cookies are never sent cross-site — this
-    // cookie would get set right after the OAuth redirect and then never
-    // be attached to a single fetch() call afterwards. See routes/auth.js
-    // setAuthCookie for the same fix with the fuller explanation.
-    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-    maxAge: 7 * 24 * 60 * 60 * 1000,                 // 7 days
-    path: "/",
-  });
+  // See middleware/auth.js authCookieOptions() for the full reasoning —
+  // shared now instead of keeping its own copy of this logic.
+  res.cookie("token", token, authCookieOptions(7 * 24 * 60 * 60 * 1000)); // 7 days
 
   return token;  // returned so we can also send it in JSON for mobile clients
 }
