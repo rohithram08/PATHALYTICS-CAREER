@@ -2,6 +2,10 @@
 import app from "./server.js";
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () =>
+const server = app.listen(PORT, "0.0.0.0", () =>
   console.log(`✅ Server running on http://localhost:${PORT}`)
 );
+server.on("error", (err) => {
+  console.error("❌ Failed to bind port:", err);
+  process.exit(1);
+});

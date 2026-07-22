@@ -14,6 +14,7 @@
 
 import dotenv from "dotenv";
 dotenv.config();
+console.log(`[startup] process.env.PORT = ${JSON.stringify(process.env.PORT)} (raw, right after dotenv.config())`);
 
 import express from "express";
 import cors from "cors";
@@ -216,9 +217,26 @@ if (process.env.NODE_ENV !== "test") {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const PORT = process.env.PORT || 5000;
-  app.listen(PORT, () =>
-    console.log(`   Bound directly by server.js on port ${PORT} (no start.js in this run)`)
-  );
+  // Explicit "0.0.0.0" here, not left to Node's default: Render's docs
+  // state every web service MUST bind to host 0.0.0.0 specifically for
+  // their port scanner to see it (a bind that only ends up reachable on
+  // a loopback/internal interface looks, from the scanner's side,
+  // identical to "nothing is listening" — same symptom, different
+  // cause, and worth ruling out explicitly rather than trusting
+  // whatever Node's default host resolution happens to do).
+  const server = app.listen(PORT, "0.0.0.0", () => {
+    const addr = server.address();
+    console.log(`   Bound directly by server.js on ${addr.address}:${addr.port} (no start.js in this run)`);
+  });
+  server.on("error", (err) => {
+    // A failed bind here (EADDRINUSE, EACCES, etc.) would otherwise be
+    // an unhandled exception — from Render's port scanner's point of
+    // view that looks EXACTLY like "never bound a port at all", which
+    // is confusing to debug since the logs above already said "ready".
+    // Fail loudly instead.
+    console.error("❌ Failed to bind port:", err);
+    process.exit(1);
+  });
 }
 
 export default app;
