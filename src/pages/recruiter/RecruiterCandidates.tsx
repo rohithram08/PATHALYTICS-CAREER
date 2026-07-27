@@ -40,7 +40,18 @@ interface Candidate {
 }
 
 async function apiFetch(path: string, opts?: RequestInit) {
-  const res = await fetch(`${API_BASE}${path}`, { credentials: "include", ...opts });
+  // Module-level helper, not a component — can't call useAuth() here.
+  // Reads the same localStorage key AuthContext.tsx writes to (must stay
+  // in sync with TOKEN_KEY there), same approach src/lib/api.ts uses.
+  const token = localStorage.getItem("pathalytics_token");
+  const res = await fetch(`${API_BASE}${path}`, {
+    credentials: "include",
+    ...opts,
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(opts?.headers || {}),
+    },
+  });
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Request failed");
   return res.json();
 }

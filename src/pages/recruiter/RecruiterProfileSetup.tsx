@@ -14,6 +14,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
+import { useAuth } from "@/hooks/useAuth";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
@@ -168,6 +169,7 @@ function DocumentRow({
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function RecruiterProfileSetup() {
+  const { token } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Profile state
@@ -189,26 +191,32 @@ export default function RecruiterProfileSetup() {
   const loadProfile = useCallback(async () => {
     setLoadingProfile(true);
     try {
-      const res = await fetch(`${API_BASE}/api/recruiter/profile`, { credentials: "include" });
+      const res = await fetch(`${API_BASE}/api/recruiter/profile`, {
+        credentials: "include",
+        headers: { Authorization: `Bearer ${token}` },
+      });
       if (res.ok) setProfile(await res.json());
     } catch {
       toast.error("Could not load profile");
     } finally {
       setLoadingProfile(false);
     }
-  }, []);
+  }, [token]);
 
   const loadDocuments = useCallback(async () => {
     setLoadingDocs(true);
     try {
-      const res = await fetch(`${API_BASE}/api/recruiter/documents`, { credentials: "include" });
+      const res = await fetch(`${API_BASE}/api/recruiter/documents`, {
+        credentials: "include",
+        headers: { Authorization: `Bearer ${token}` },
+      });
       if (res.ok) setDocuments(await res.json());
     } catch {
       toast.error("Could not load documents");
     } finally {
       setLoadingDocs(false);
     }
-  }, []);
+  }, [token]);
 
   useEffect(() => {
     loadProfile();
@@ -227,7 +235,7 @@ export default function RecruiterProfileSetup() {
       const res = await fetch(`${API_BASE}/api/recruiter/profile`, {
         method:      "PATCH",
         credentials: "include",
-        headers:     { "Content-Type": "application/json" },
+        headers:     { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           company_name: profile.company_name.trim(),
           company_size: profile.company_size,
@@ -264,6 +272,7 @@ export default function RecruiterProfileSetup() {
         const xhr = new XMLHttpRequest();
         xhr.open("POST", `${API_BASE}/api/recruiter/documents/upload`);
         xhr.withCredentials = true;
+        xhr.setRequestHeader("Authorization", `Bearer ${token}`);
 
         xhr.upload.onprogress = (e) => {
           if (e.lengthComputable) setUploadPct(Math.round((e.loaded / e.total) * 100));
@@ -294,7 +303,7 @@ export default function RecruiterProfileSetup() {
       setUploading(false);
       setUploadPct(0);
     }
-  }, [docType, loadDocuments]);
+  }, [docType, loadDocuments, token]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -316,6 +325,7 @@ export default function RecruiterProfileSetup() {
       const res = await fetch(`${API_BASE}/api/recruiter/documents/${id}`, {
         method:      "DELETE",
         credentials: "include",
+        headers:     { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error((await res.json()).message);
       setDocuments((prev) => prev.filter((d) => d.id !== id));

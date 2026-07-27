@@ -150,7 +150,7 @@ function PipelineFunnel({ apps }: { apps: DashboardData["applications"] }) {
 
 // ── Main Dashboard ────────────────────────────────────────────
 export default function RecruiterDashboard() {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const navigate = useNavigate();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -161,6 +161,7 @@ export default function RecruiterDashboard() {
     try {
       const res = await fetch(`${API_BASE}/api/recruiter/dashboard`, {
         credentials: "include",
+        headers: { Authorization: `Bearer ${token}` },
       });
       if (res.status === 401) { navigate("/login"); return; }
       if (!res.ok) throw new Error("Failed to load dashboard");
@@ -171,7 +172,7 @@ export default function RecruiterDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [navigate]);
+  }, [navigate, token]);
 
   useEffect(() => { fetchDashboard(); }, [fetchDashboard]);
 

@@ -11,6 +11,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
+import { useAuth } from "@/hooks/useAuth";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
@@ -174,6 +175,7 @@ function TopJobsTable({ jobs }: { jobs: AnalyticsData["topJobs"] }) {
 
 export default function RecruiterAnalytics() {
   const navigate = useNavigate();
+  const { token } = useAuth();
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [days, setDays] = useState("30");
@@ -183,6 +185,7 @@ export default function RecruiterAnalytics() {
     try {
       const res = await fetch(`${API_BASE}/api/recruiter/analytics?days=${days}`, {
         credentials: "include",
+        headers: { Authorization: `Bearer ${token}` },
       });
       if (res.status === 401) { navigate("/login"); return; }
       if (!res.ok) throw new Error("Failed to load analytics");
@@ -192,7 +195,7 @@ export default function RecruiterAnalytics() {
     } finally {
       setLoading(false);
     }
-  }, [days, navigate]);
+  }, [days, navigate, token]);
 
   useEffect(() => { fetchAnalytics(); }, [fetchAnalytics]);
 
