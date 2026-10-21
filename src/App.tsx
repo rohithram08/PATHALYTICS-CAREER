@@ -69,6 +69,8 @@ const RecruiterProfileSetup       = lazy(() => import("./pages/recruiter/Recruit
 const EditJob                     = lazy(() => import("./pages/recruiter/EditJob"));
 const CandidatesList              = lazy(() => import("./pages/recruiter/CandidatesList"));
 const RecruiterCandidates         = lazy(() => import("./pages/recruiter/RecruiterCandidates")); // ← Doc 2
+const CandidateDetail             = lazy(() => import("./pages/recruiter/CandidateDetail"));
+const RecruiterMessages           = lazy(() => import("./pages/recruiter/RecruiterMessages"));
 const RecruiterAnalytics          = lazy(() => import("./pages/recruiter/RecruiterAnalytics"));  // ← Doc 2
 const RecruiterJobForm            = lazy(() => import("./pages/recruiter/RecruiterJobForm"));    // ← Doc 2
 
@@ -197,7 +199,10 @@ const App = () => (
                       <Route path="/recruiter/jobs/:jobId/edit"           element={<EditJob />} />
                       <Route path="/recruiter/jobs/:id"                   element={<RecruiterJobForm />} />    {/* ← Doc 2 */}
                       <Route path="/recruiter/candidates"                 element={<CandidatesList />} />
+                      <Route path="/recruiter/candidates/pipeline"        element={<RecruiterCandidates />} />
                       <Route path="/recruiter/candidates/browse"          element={<RecruiterCandidates />} /> {/* ← Doc 2 */}
+                      <Route path="/recruiter/candidates/:id"             element={<CandidateDetail />} />
+                      <Route path="/recruiter/messages"                   element={<RecruiterMessages />} />
                       <Route path="/recruiter/analytics"                  element={<RecruiterAnalytics />} />  {/* ← Doc 2 */}
 
                       {/* Verified recruiters only */}

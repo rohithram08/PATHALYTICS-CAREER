@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowLeft, FileText, Download, ChevronDown } from "lucide-react";
+import { ArrowLeft, FileText, Download, ChevronDown, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -11,14 +11,10 @@ import {
 import { toast } from "sonner";
 import {
   recruiterApi,
+  API_URL,
   type RecruiterApplicant as Applicant,
   type RecruiterJobStage as Stage,
 } from "@/lib/api";
-
-// Still needed for the direct resume-download <a href> below — that's a
-// browser navigation (relies on the httpOnly cookie), not a fetch() call,
-// so it's outside recruiterApi's scope.
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 const STATUS_OPTIONS = ["applied","in-review","interview","offer","rejected"];
 
@@ -183,16 +179,24 @@ const ApplicationsReview = () => {
                         <p className="text-sm">{app.cover_note}</p>
                       </div>
                     )}
-                    {app.resume_storage_key && (
-                      <a
-                        href={`${API_URL}/api/recruiter/resumes/${app.id}/download`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-2 text-sm text-primary hover:underline">
-                        <FileText className="w-4 h-4" />
-                        Download resume
-                      </a>
-                    )}
+                    <div className="flex items-center gap-4 flex-wrap pt-1">
+                      {app.resume_storage_key && (
+                        <a
+                          href={`${API_URL}/api/recruiter/resumes/${app.id}/download`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline font-medium">
+                          <FileText className="w-3.5 h-3.5" />
+                          Download resume
+                        </a>
+                      )}
+                      <Link
+                        to={`/recruiter/candidates/${app.id}`}
+                        className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline font-medium">
+                        <Eye className="w-3.5 h-3.5" />
+                        View Full Candidate Profile & Details
+                      </Link>
+                    </div>
                     {!app.cover_note && !app.resume_storage_key && (
                       <p className="text-sm text-muted-foreground">No cover note or resume attached</p>
                     )}

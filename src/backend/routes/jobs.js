@@ -14,6 +14,8 @@ const jobSchemaBase = z.object({
   description: z.string().min(20).trim(),
   location: z.string().min(2).max(150).trim(),
   jobType: z.enum(["full-time", "part-time", "internship", "contract"]).default("full-time"),
+  experienceLevel: z.enum(["entry", "mid", "senior", "lead", "director", "any"]).optional(),
+  skills: z.union([z.array(z.string()), z.string()]).optional(),
   salaryMin: z.number().int().positive().optional(),
   salaryMax: z.number().int().positive().optional(),
   applicationMode: z.enum(["internal", "external"]).default("internal"),
@@ -72,15 +74,21 @@ router.post("/", requireAuth, requireRole("recruiter"), async (req, res) => {
     const {
       title, description, location, jobType,
       salaryMin, salaryMax, applicationMode, externalApplyUrl,
+      experienceLevel, skills,
     } = parsed.data;
+
+    const formattedSkills = skills
+      ? (Array.isArray(skills) ? JSON.stringify(skills) : skills)
+      : null;
 
     const [result] = await db.query(
       `INSERT INTO jobs
-         (recruiter_id, title, description, location, job_type, salary_min, salary_max, application_mode, external_apply_url, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')`,
+         (recruiter_id, title, description, location, job_type, salary_min, salary_max, application_mode, external_apply_url, experience_level, skills, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')`,
       [
         req.user.id, title, description, location, jobType,
         salaryMin ?? null, salaryMax ?? null, applicationMode, externalApplyUrl ?? null,
+        experienceLevel ?? "any", formattedSkills,
       ]
     );
 
@@ -121,6 +129,8 @@ router.patch("/:id", requireAuth, requireRole("recruiter"), requireOwnJob, async
       description: "description",
       location: "location",
       jobType: "job_type",
+      experienceLevel: "experience_level",
+      skills: "skills",
       salaryMin: "salary_min",
       salaryMax: "salary_max",
       applicationMode: "application_mode",
@@ -131,7 +141,11 @@ router.patch("/:id", requireAuth, requireRole("recruiter"), requireOwnJob, async
     for (const [key, col] of Object.entries(columnMap)) {
       if (parsed.data[key] !== undefined) {
         sets.push(`${col} = ?`);
-        values.push(parsed.data[key]);
+        let val = parsed.data[key];
+        if (key === "skills" && Array.isArray(val)) {
+          val = JSON.stringify(val);
+        }
+        values.push(val);
       }
     }
     if (sets.length === 0) return res.status(400).json({ message: "No fields to update" });
@@ -141,6 +155,16 @@ router.patch("/:id", requireAuth, requireRole("recruiter"), requireOwnJob, async
     return res.json({ message: "Job updated" });
   } catch (err) {
     console.error("[jobs:update]", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.delete("/:id", requireAuth, requireRole("recruiter"), requireOwnJob, async (req, res) => {
+  try {
+    await db.query("DELETE FROM jobs WHERE id = ?", [req.params.id]);
+    return res.json({ message: "Job deleted successfully" });
+  } catch (err) {
+    console.error("[jobs:delete]", err);
     return res.status(500).json({ message: "Server error" });
   }
 });

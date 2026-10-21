@@ -1,9 +1,10 @@
-// src/pages/recruiter/CandidatesList.tsx
 import { useEffect, useState, useCallback } from "react";
+import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   Search, Briefcase, MapPin, ExternalLink, Github,
   Linkedin, Zap, Users, ChevronDown, ChevronUp,
+  Bookmark, BookmarkCheck, MessageSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,6 +28,27 @@ const CandidateCard = ({
   index: number;
 }) => {
   const [expanded, setExpanded] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [savingPool, setSavingPool] = useState(false);
+
+  const toggleTalentPool = async () => {
+    setSavingPool(true);
+    try {
+      if (saved) {
+        await recruiterApi.talentPool.remove(candidate.id);
+        setSaved(false);
+        toast.success("Removed from talent pool");
+      } else {
+        await recruiterApi.talentPool.save(candidate.id);
+        setSaved(true);
+        toast.success(`${candidate.name} saved to talent pool`);
+      }
+    } catch {
+      toast.error("Could not update talent pool");
+    } finally {
+      setSavingPool(false);
+    }
+  };
   const skills: string[] = Array.isArray(candidate.skills)
     ? candidate.skills
     : (() => {
@@ -135,7 +157,7 @@ const CandidateCard = ({
                 <p className="font-medium">{candidate.expected_salary}</p>
               </div>
             )}
-            <div className="flex items-center gap-3 ml-auto">
+            <div className="flex items-center gap-3">
               {candidate.linkedin_url && (
                 <a href={candidate.linkedin_url} target="_blank" rel="noreferrer"
                   className="flex items-center gap-1 text-primary hover:underline text-xs">
@@ -154,6 +176,32 @@ const CandidateCard = ({
                   <ExternalLink className="w-3.5 h-3.5" /> Portfolio
                 </a>
               )}
+            </div>
+
+            <div className="flex items-center gap-2 ml-auto flex-wrap">
+              <Button size="sm" variant="outline" className="h-8 text-xs" asChild>
+                <Link to={`/recruiter/messages?to=${candidate.id}`}>
+                  <MessageSquare className="w-3.5 h-3.5 mr-1.5" /> Message
+                </Link>
+              </Button>
+
+              <Button
+                size="sm"
+                variant={saved ? "secondary" : "outline"}
+                className="h-8 text-xs"
+                onClick={toggleTalentPool}
+                disabled={savingPool}
+              >
+                {saved ? (
+                  <>
+                    <BookmarkCheck className="w-3.5 h-3.5 mr-1.5 text-primary" /> Saved
+                  </>
+                ) : (
+                  <>
+                    <Bookmark className="w-3.5 h-3.5 mr-1.5" /> Save to Pool
+                  </>
+                )}
+              </Button>
             </div>
           </motion.div>
         )}
@@ -225,10 +273,24 @@ const CandidatesList = () => {
 
   return (
     <div className="min-h-screen bg-background p-6 max-w-5xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold">Candidates</h1>
+      {/* ── Mode Switcher Tabs ─────────────────────────────────── */}
+      <div className="flex items-center gap-2 border-b mb-6 pb-3">
+        <Button variant="ghost" size="sm" asChild>
+          <Link to="/recruiter/candidates/pipeline" className="flex items-center gap-2 text-muted-foreground hover:text-foreground">
+            <Users className="w-4 h-4" /> Application Pipeline (ATS)
+          </Link>
+        </Button>
+        <Button variant="secondary" size="sm" asChild>
+          <Link to="/recruiter/candidates" className="flex items-center gap-2 font-semibold">
+            <Search className="w-4 h-4 text-primary" /> Talent Sourcing & Search
+          </Link>
+        </Button>
+      </div>
+
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold tracking-tight">Talent Sourcing & Candidate Search</h1>
         <p className="text-muted-foreground mt-1">
-          Students who are open to recruiter outreach
+          Search students open to recruiter outreach, or match candidates to your published jobs
         </p>
       </div>
 

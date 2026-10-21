@@ -165,53 +165,28 @@ export default function RecruiterDashboard() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* ── Header ──────────────────────────────────────────── */}
-      <header className="border-b bg-card/80 backdrop-blur sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <span className="font-bold text-lg tracking-tight">Pathalytics</span>
-            <Badge variant="secondary" className="text-[11px]">Recruiter</Badge>
-          </div>
-          <nav className="hidden md:flex items-center gap-1">
-            <Button variant="ghost" size="sm" asChild>
-              <Link to="/recruiter/jobs">Jobs</Link>
-            </Button>
-            <Button variant="ghost" size="sm" asChild>
-              <Link to="/recruiter/candidates">Candidates</Link>
-            </Button>
-            <Button variant="ghost" size="sm" asChild>
-              <Link to="/recruiter/analytics">Analytics</Link>
-            </Button>
-            <Button variant="ghost" size="sm" asChild>
-              <Link to="/recruiter/messages">
-                <MessageSquare className="w-4 h-4 mr-1" /> Messages
-              </Link>
-            </Button>
-          </nav>
-          <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" onClick={fetchDashboard}>
-              <RefreshCw className="w-3.5 h-3.5" />
-            </Button>
-            <Button size="sm" asChild>
-              <Link to="/recruiter/jobs/new">
-                <Plus className="w-3.5 h-3.5 mr-1" /> Post a Job
-              </Link>
-            </Button>
-          </div>
-        </div>
-      </header>
-
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-8">
-        {/* ── Greeting ─────────────────────────────────────── */}
-        <div className="flex items-center justify-between">
+        {/* ── Greeting & Top Actions ────────────────────────── */}
+        <div className="flex items-center justify-between flex-wrap gap-4">
           <div>
             <h1 className="text-2xl font-bold">
               Good {new Date().getHours() < 12 ? "morning" : new Date().getHours() < 17 ? "afternoon" : "evening"},{" "}
               {user?.name?.split(" ")[0]} 👋
             </h1>
             <p className="text-muted-foreground text-sm mt-0.5">
-              Here's what's happening with your hiring today
+              Here's what's happening with your hiring pipeline today
             </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={fetchDashboard} title="Refresh metrics">
+              <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Refresh
+            </Button>
+            <Button size="sm" asChild>
+              <Link to="/recruiter/jobs/new">
+                <Plus className="w-3.5 h-3.5 mr-1" /> Post a Job
+              </Link>
+            </Button>
           </div>
         </div>
 

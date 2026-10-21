@@ -273,7 +273,7 @@ const candidateProfileSchema = z.object({
   linkedinUrl:           z.string().url().optional().or(z.literal("")),
   githubUrl:             z.string().url().optional().or(z.literal("")),
   portfolioUrl:          z.string().url().optional().or(z.literal("")),
-  yearsOfExperience:     z.string().max(20).trim().optional(),
+  yearsOfExperience:     z.union([z.string().max(20).trim(), z.number().transform(n => String(n))]).optional(),
   currentRole:           z.string().max(150).trim().optional(),
   currentCompany:        z.string().max(150).trim().optional(),
   expectedSalary:        z.string().max(50).trim().optional(),

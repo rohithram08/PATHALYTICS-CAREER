@@ -333,10 +333,40 @@ export interface RecruiterJobInput {
   description: string;
   location: string;
   jobType: string;
+  experienceLevel?: string;
+  skills?: string[] | string;
   salaryMin?: number | null;
   salaryMax?: number | null;
   applicationMode: string;
   externalApplyUrl?: string;
+}
+
+export interface RecruiterCandidateDetail {
+  application_id: number;
+  stage: string;
+  notes: string | null;
+  applied_at: string;
+  resume_storage_key: string | null;
+  user_id: number;
+  name: string;
+  email: string;
+  avatar_url: string | null;
+  job_id: number;
+  job_title: string;
+  phone?: string | null;
+  location?: string | null;
+  linkedin_url?: string | null;
+  github_url?: string | null;
+  portfolio_url?: string | null;
+  years_of_experience?: string | null;
+  current_role?: string | null;
+  current_company?: string | null;
+  expected_salary?: string | null;
+  notice_period?: string | null;
+  skills?: string[];
+  work_experience?: Array<{ title: string; company: string; startDate: string; endDate?: string; description?: string }>;
+  education?: Array<{ degree: string; institution: string; startYear?: string; endYear?: string }>;
+  projects?: Array<{ title: string; description?: string; url?: string; techStack?: string }>;
 }
 
 export interface RecruiterJobStage {
@@ -476,6 +506,7 @@ export const recruiterApi = {
     update:  (id: number | string, body: RecruiterJobInput) => api.patch<{ message: string }>(`/api/jobs/${id}`, body),
     publish: (id: number | string) => api.patch<{ message: string }>(`/api/jobs/${id}/publish`),
     close:   (id: number | string) => api.patch<{ message: string }>(`/api/jobs/${id}/close`),
+    delete:  (id: number | string) => api.del<{ message: string }>(`/api/jobs/${id}`),
     stages: {
       get:    (id: number | string) => api.get<RecruiterJobStage[]>(`/api/jobs/${id}/stages`),
       update: (id: number | string, stages: RecruiterJobStageInput[]) =>
@@ -485,6 +516,8 @@ export const recruiterApi = {
 
   // /api/recruiter/candidates* — recruiter.js
   candidates: {
+    get: (id: number | string) =>
+      api.get<RecruiterCandidateDetail>(`/api/recruiter/candidates/${id}`),
     browse: (params: { search?: string; skill?: string } = {}) => {
       const qs = new URLSearchParams();
       if (params.search) qs.set("search", params.search);

@@ -8,7 +8,7 @@ import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Briefcase, Plus, User,
   LogOut, Menu, X, CheckCircle2, AlertCircle, Clock,
-  Users, BarChart3,
+  Users, BarChart3, MessageSquare,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Button }        from "@/components/ui/button";
@@ -22,6 +22,7 @@ const NAV: { label: string; href: string; icon: LucideIcon }[] = [
   { label: "Dashboard",      href: "/recruiter/dashboard",  icon: LayoutDashboard },
   { label: "Manage Jobs",    href: "/recruiter/jobs",       icon: Briefcase       },
   { label: "Candidates",     href: "/recruiter/candidates", icon: Users           },
+  { label: "Messages",       href: "/recruiter/messages",   icon: MessageSquare   },
   { label: "Analytics",      href: "/recruiter/analytics",  icon: BarChart3       },
   { label: "Profile & Docs", href: "/recruiter/profile",    icon: User            },
 ];

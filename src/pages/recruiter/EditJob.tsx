@@ -56,6 +56,8 @@ interface JobForm {
   description: string;
   location: string;
   jobType: string;
+  experienceLevel: string;
+  skills: string;
   salaryMin: string;
   salaryMax: string;
   applicationMode: string;
@@ -111,6 +113,8 @@ const EditJob = () => {
     description: "",
     location: "",
     jobType: "full-time",
+    experienceLevel: "any",
+    skills: "",
     salaryMin: "",
     salaryMax: "",
     applicationMode: "internal",
@@ -130,12 +134,26 @@ const EditJob = () => {
         const stagesPromise = recruiterApi.jobs.stages.get(jobId!).catch(() => null);
         const job = await recruiterApi.jobs.get(jobId!);
 
+        let parsedSkills = "";
+        if (Array.isArray(job.skills)) {
+          parsedSkills = job.skills.join(", ");
+        } else if (typeof job.skills === "string") {
+          try {
+            const arr = JSON.parse(job.skills);
+            parsedSkills = Array.isArray(arr) ? arr.join(", ") : job.skills;
+          } catch {
+            parsedSkills = job.skills;
+          }
+        }
+
         setJobStatus(job.status);
         setForm({
           title: job.title || "",
           description: job.description || "",
           location: job.location || "",
           jobType: job.job_type || "full-time",
+          experienceLevel: job.experience_level || "any",
+          skills: parsedSkills,
           salaryMin: job.salary_min != null ? String(job.salary_min) : "",
           salaryMax: job.salary_max != null ? String(job.salary_max) : "",
           applicationMode: job.application_mode || "internal",
@@ -191,8 +209,18 @@ const EditJob = () => {
     if (!validateDetails()) return;
     setSavingDetails(true);
     try {
+      const skillsArray = form.skills
+        ? form.skills.split(",").map((s) => s.trim()).filter(Boolean)
+        : [];
       await recruiterApi.jobs.update(jobId!, {
-        ...form,
+        title: form.title,
+        description: form.description,
+        location: form.location,
+        jobType: form.jobType,
+        experienceLevel: form.experienceLevel,
+        skills: skillsArray,
+        applicationMode: form.applicationMode,
+        externalApplyUrl: form.externalApplyUrl || undefined,
         salaryMin: form.salaryMin ? Number(form.salaryMin) : null,
         salaryMax: form.salaryMax ? Number(form.salaryMax) : null,
       });
@@ -245,6 +273,20 @@ const EditJob = () => {
     }
   };
 
+  const handleDelete = async () => {
+    if (!jobId) return;
+    if (!window.confirm("Are you sure you want to delete this job listing? Applications and pipeline stages associated with it will also be removed.")) {
+      return;
+    }
+    try {
+      await recruiterApi.jobs.delete(jobId);
+      toast.success("Job deleted successfully");
+      navigate("/recruiter/jobs");
+    } catch {
+      toast.error("Failed to delete job");
+    }
+  };
+
   // ── Loading skeleton ─────────────────────────────────────────────────
   if (loading) {
     return (
@@ -259,29 +301,40 @@ const EditJob = () => {
     <div className="min-h-screen bg-background p-6 max-w-2xl mx-auto">
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}>
         {/* Header */}
-        <div className="flex items-center gap-3 mb-8">
-          <Button variant="ghost" size="icon" asChild>
-            <Link to="/recruiter/jobs">
-              <ArrowLeft className="w-4 h-4" />
-            </Link>
-          </Button>
-          <div>
-            <h1 className="text-3xl font-bold">Edit Job</h1>
-            <p className="text-muted-foreground text-sm mt-0.5">
-              Status:{" "}
-              <span
-                className={
-                  jobStatus === "published"
-                    ? "text-emerald-600 font-medium"
-                    : jobStatus === "closed"
-                    ? "text-gray-500 font-medium"
-                    : "text-yellow-600 font-medium"
-                }
-              >
-                {jobStatus}
-              </span>
-            </p>
+        <div className="flex items-center justify-between mb-8 flex-wrap gap-4">
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="icon" asChild>
+              <Link to="/recruiter/jobs">
+                <ArrowLeft className="w-4 h-4" />
+              </Link>
+            </Button>
+            <div>
+              <h1 className="text-3xl font-bold">Edit Job</h1>
+              <p className="text-muted-foreground text-sm mt-0.5">
+                Status:{" "}
+                <span
+                  className={
+                    jobStatus === "published"
+                      ? "text-emerald-600 font-medium"
+                      : jobStatus === "closed"
+                      ? "text-gray-500 font-medium"
+                      : "text-yellow-600 font-medium"
+                  }
+                >
+                  {jobStatus}
+                </span>
+              </p>
+            </div>
           </div>
+
+          <Button
+            variant="ghost"
+            className="text-destructive hover:bg-destructive/10"
+            onClick={handleDelete}
+          >
+            <Trash2 className="w-4 h-4 mr-2" />
+            Delete Job
+          </Button>
         </div>
 
         <TabBar active={activeTab} onChange={setActiveTab} />
@@ -368,6 +421,38 @@ const EditJob = () => {
                   value={form.salaryMax}
                   onChange={(e) => setField("salaryMax", e.target.value)}
                 />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Experience Level</Label>
+                <Select
+                  value={form.experienceLevel}
+                  onValueChange={(v) => setField("experienceLevel", v)}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="any">Any Experience</SelectItem>
+                    <SelectItem value="entry">Entry Level (0-2 yrs)</SelectItem>
+                    <SelectItem value="mid">Mid Level (3-5 yrs)</SelectItem>
+                    <SelectItem value="senior">Senior (5-8 yrs)</SelectItem>
+                    <SelectItem value="lead">Lead / Principal (8+ yrs)</SelectItem>
+                    <SelectItem value="director">Director / Executive</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Required Skills</Label>
+                <Input
+                  placeholder="e.g. React, TypeScript, Node.js"
+                  value={form.skills}
+                  onChange={(e) => setField("skills", e.target.value)}
+                />
+                <p className="text-[11px] text-muted-foreground">Separate skills with commas</p>
               </div>
             </div>
 

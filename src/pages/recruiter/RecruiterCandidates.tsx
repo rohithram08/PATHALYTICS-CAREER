@@ -67,7 +67,7 @@ function CandidateCard({ candidate, onStatusChange }: {
             </Link>
           </Button>
           <Button size="icon" variant="ghost" className="h-6 w-6" asChild>
-            <Link to={`/recruiter/messages/compose?to=${candidate.user_id}`}>
+            <Link to={`/recruiter/messages?to=${candidate.user_id}`}>
               <MessageSquare className="w-3.5 h-3.5" />
             </Link>
           </Button>
@@ -178,7 +178,7 @@ function ListView({ candidates, onStatusChange }: {
                       </Link>
                     </Button>
                     <Button size="icon" variant="ghost" className="h-7 w-7" asChild>
-                      <Link to={`/recruiter/messages/compose?to=${c.user_id}`}>
+                      <Link to={`/recruiter/messages?to=${c.user_id}`}>
                         <MessageSquare className="w-3.5 h-3.5" />
                       </Link>
                     </Button>
@@ -252,7 +252,14 @@ export default function RecruiterCandidates() {
             <Button variant="ghost" size="icon" asChild>
               <Link to="/recruiter/dashboard"><ChevronLeft className="w-4 h-4" /></Link>
             </Button>
-            <h1 className="font-semibold">Candidates</h1>
+            <div className="flex items-center gap-1 bg-muted p-1 rounded-lg">
+              <Button size="sm" variant="default" className="h-7 text-xs px-2.5 font-medium" asChild>
+                <Link to="/recruiter/candidates/pipeline">Pipeline (ATS)</Link>
+              </Button>
+              <Button size="sm" variant="ghost" className="h-7 text-xs px-2.5 text-muted-foreground hover:text-foreground" asChild>
+                <Link to="/recruiter/candidates">Talent Search</Link>
+              </Button>
+            </div>
             {total > 0 && <Badge variant="secondary">{total}</Badge>}
           </div>
           <div className="flex items-center gap-2">

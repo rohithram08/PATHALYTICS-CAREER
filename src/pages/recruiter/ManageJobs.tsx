@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Plus, Users, ExternalLink, Edit2, CheckCircle2, XCircle, Clock } from "lucide-react";
+import { Plus, Users, ExternalLink, Edit2, CheckCircle2, XCircle, Clock, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -64,6 +64,22 @@ const ManageJobs = () => {
       await loadJobs();
     } catch {
       toast.error("Could not close job");
+    } finally {
+      setActioning(null);
+    }
+  };
+
+  const deleteJob = async (id: number) => {
+    if (!window.confirm("Are you sure you want to delete this job listing? Applications and pipeline stages associated with it will also be removed.")) {
+      return;
+    }
+    setActioning(id);
+    try {
+      await recruiterApi.jobs.delete(id);
+      toast.success("Job deleted successfully");
+      await loadJobs();
+    } catch {
+      toast.error("Could not delete job");
     } finally {
       setActioning(null);
     }
@@ -142,10 +158,20 @@ const ManageJobs = () => {
                       Close
                     </Button>
                   )}
-                  <Button size="sm" variant="ghost" asChild>
+                  <Button size="sm" variant="ghost" asChild title="Edit job">
                     <Link to={`/recruiter/jobs/${job.id}/edit`}>
                       <Edit2 className="w-4 h-4" />
                     </Link>
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                    onClick={() => deleteJob(job.id)}
+                    disabled={actioning === job.id}
+                    title="Delete job"
+                  >
+                    <Trash2 className="w-4 h-4" />
                   </Button>
                 </div>
               </Card>

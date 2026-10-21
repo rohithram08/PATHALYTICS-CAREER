@@ -68,11 +68,16 @@ const jobFormSchema = z.object({
   is_active: z.boolean().default(true),
 });
 
-const messageSchema = z.object({
-  recipient_id: z.number().int().positive(),
-  subject: z.string().min(1).max(200),
-  body: z.string().min(1).max(5000),
-});
+const messageSchema = z
+  .object({
+    recipient_id: z.number().int().positive().optional(),
+    recipientId: z.number().int().positive().optional(),
+    subject: z.string().min(1).max(200),
+    body: z.string().min(1).max(5000),
+  })
+  .refine((data) => data.recipient_id || data.recipientId, {
+    message: "recipient_id is required",
+  });
 
 const documentUploadSchema = z.object({
   document_type: z.enum(["incorporation_certificate", "gst_certificate", "company_pan", "other"]),
@@ -503,22 +508,73 @@ router.get("/candidates/match/:jobId", requireVerifiedRecruiter, async (req, res
 });
 
 // ── GET /candidates/:id ───────────────────────────────────────
+// Supports resolving by application_id (for ATS pipeline reviews) OR by
+// candidate user_id (for talent sourcing & talent pool directory views).
 router.get("/candidates/:id", requireVerifiedRecruiter, async (req, res) => {
   try {
-    const [rows] = await db.query(
+    const parseJson = (val) => {
+      if (!val) return [];
+      if (typeof val === "object") return val;
+      try { return JSON.parse(val); } catch { return []; }
+    };
+
+    // 1. First check if id matches an application for one of this recruiter's jobs
+    const [appRows] = await db.query(
       `SELECT a.id AS application_id, a.status AS stage, a.cover_note AS notes,
               a.applied_at, a.resume_storage_key,
               u.id AS user_id, u.name, u.email, u.avatar_url,
-              j.id AS job_id, j.title AS job_title
+              j.id AS job_id, j.title AS job_title,
+              cp.phone, cp.location, cp.linkedin_url, cp.github_url, cp.portfolio_url,
+              cp.years_of_experience, cp.\`current_role\`, cp.current_company,
+              cp.expected_salary, cp.notice_period, cp.skills,
+              cp.work_experience, cp.education, cp.projects
        FROM applications a
        JOIN users u ON a.user_id = u.id
        JOIN jobs j ON a.job_id = j.id
+       LEFT JOIN candidate_profiles cp ON cp.user_id = u.id
        WHERE a.id = ? AND j.recruiter_id = ?`,
       [req.params.id, req.user.id]
     );
 
-    if (!rows.length) return res.status(404).json({ message: "Application not found" });
-    return res.json(rows[0]);
+    if (appRows.length > 0) {
+      const row = appRows[0];
+      return res.json({
+        ...row,
+        skills: parseJson(row.skills),
+        work_experience: parseJson(row.work_experience),
+        education: parseJson(row.education),
+        projects: parseJson(row.projects),
+      });
+    }
+
+    // 2. Fallback: match by candidate user_id (e.g. from talent search or talent pool)
+    const [userRows] = await db.query(
+      `SELECT NULL AS application_id, 'sourced' AS stage, NULL AS notes,
+              NULL AS applied_at, NULL AS resume_storage_key,
+              u.id AS user_id, u.name, u.email, u.avatar_url,
+              NULL AS job_id, NULL AS job_title,
+              cp.phone, cp.location, cp.linkedin_url, cp.github_url, cp.portfolio_url,
+              cp.years_of_experience, cp.\`current_role\`, cp.current_company,
+              cp.expected_salary, cp.notice_period, cp.skills,
+              cp.work_experience, cp.education, cp.projects
+       FROM users u
+       LEFT JOIN candidate_profiles cp ON cp.user_id = u.id
+       WHERE u.id = ? AND (cp.is_visible_to_recruiters = true OR cp.id IS NOT NULL)`,
+      [req.params.id]
+    );
+
+    if (userRows.length > 0) {
+      const row = userRows[0];
+      return res.json({
+        ...row,
+        skills: parseJson(row.skills),
+        work_experience: parseJson(row.work_experience),
+        education: parseJson(row.education),
+        projects: parseJson(row.projects),
+      });
+    }
+
+    return res.status(404).json({ message: "Candidate or application not found" });
   } catch (err) {
     console.error("[recruiter/candidates/:id GET]", err);
     return res.status(500).json({ message: "Server error" });
@@ -593,7 +649,7 @@ router.get("/analytics", requireVerifiedRecruiter, async (req, res) => {
 router.get("/talent-pool", requireVerifiedRecruiter, async (req, res) => {
   try {
     const [saved] = await db.query(
-      `SELECT u.id, u.name, u.email, u.avatar_url,
+      `SELECT u.id, u.id AS candidate_id, u.name, u.email, u.avatar_url,
               tp.notes, tp.created_at AS saved_at
        FROM talent_pool tp
        JOIN users u ON tp.candidate_id = u.id
@@ -647,18 +703,19 @@ router.post("/messages", requireVerifiedRecruiter, async (req, res) => {
       return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten().fieldErrors });
     }
 
-    const { recipient_id, subject, body } = parsed.data;
+    const recipient_id = parsed.data.recipient_id || parsed.data.recipientId;
+    const { subject, body } = parsed.data;
 
     const [[recipient]] = await db.query("SELECT id, name, email FROM users WHERE id = ?", [recipient_id]);
     if (!recipient) return res.status(404).json({ message: "Recipient not found" });
 
-    await db.query(
+    const [result] = await db.query(
       `INSERT INTO messages (sender_id, recipient_id, subject, body, read_at)
        VALUES (?, ?, ?, ?, NULL)`,
       [req.user.id, recipient_id, subject, body]
     );
 
-    return res.status(201).json({ message: "Message sent" });
+    return res.status(201).json({ message: "Message sent", messageId: result.insertId });
   } catch (err) {
     console.error("[recruiter/messages POST]", err);
     return res.status(500).json({ message: "Server error" });

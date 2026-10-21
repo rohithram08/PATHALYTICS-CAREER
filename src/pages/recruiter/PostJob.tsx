@@ -35,6 +35,7 @@ interface Stage {
 
 const emptyJob = {
   title: "", description: "", location: "", jobType: "full-time",
+  experienceLevel: "any", skills: "",
   salaryMin: "", salaryMax: "", applicationMode: "internal", externalApplyUrl: "",
 };
 
@@ -76,8 +77,18 @@ const PostJob = () => {
     if (!validateStep1()) return;
     setSaving(true);
     try {
+      const skillsArray = job.skills
+        ? job.skills.split(",").map((s) => s.trim()).filter(Boolean)
+        : [];
       const body: RecruiterJobInput = {
-        ...job,
+        title: job.title,
+        description: job.description,
+        location: job.location,
+        jobType: job.jobType,
+        experienceLevel: job.experienceLevel,
+        skills: skillsArray,
+        applicationMode: job.applicationMode,
+        externalApplyUrl: job.externalApplyUrl || undefined,
         salaryMin: job.salaryMin ? Number(job.salaryMin) : undefined,
         salaryMax: job.salaryMax ? Number(job.salaryMax) : undefined,
       };
@@ -205,6 +216,33 @@ const PostJob = () => {
                 <Label>Max salary (₹)</Label>
                 <Input type="number" placeholder="e.g. 800000" value={job.salaryMax}
                   onChange={(e) => set("salaryMax", e.target.value)} />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Experience Level</Label>
+                <Select value={job.experienceLevel} onValueChange={(v) => set("experienceLevel", v)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="any">Any Experience</SelectItem>
+                    <SelectItem value="entry">Entry Level (0-2 yrs)</SelectItem>
+                    <SelectItem value="mid">Mid Level (3-5 yrs)</SelectItem>
+                    <SelectItem value="senior">Senior (5-8 yrs)</SelectItem>
+                    <SelectItem value="lead">Lead / Principal (8+ yrs)</SelectItem>
+                    <SelectItem value="director">Director / Executive</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Required Skills</Label>
+                <Input
+                  placeholder="e.g. React, TypeScript, Node.js"
+                  value={job.skills}
+                  onChange={(e) => set("skills", e.target.value)}
+                />
+                <p className="text-[11px] text-muted-foreground">Separate skills with commas</p>
               </div>
             </div>
 
