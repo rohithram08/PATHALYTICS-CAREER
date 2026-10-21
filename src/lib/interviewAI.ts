@@ -1,15 +1,24 @@
 // src/lib/interviewAI.ts
 import { Difficulty } from '@/types/interview';
+import { API_URL } from '@/lib/api';
 
-const CHATBOT_URL = 'http://localhost:8000/api/chat';
+const CHATBOT_ENDPOINT = `${API_URL}/api/chatbot/chat`;
 
 // One stable session ID per browser tab session
 const SESSION_ID = `interview-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 const callChatbot = async (message: string): Promise<string> => {
-  const res = await fetch(CHATBOT_URL, {
+  const token = localStorage.getItem('pathalytics_token');
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const res = await fetch(CHATBOT_ENDPOINT, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({
       message,
       session_id: SESSION_ID,
@@ -127,7 +136,7 @@ Return ONLY valid JSON:
     const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : cleaned);
 
     let score = Number(parsed.score);
-    let feedback = String(parsed.feedback || 'No feedback provided.');
+    const feedback = String(parsed.feedback || 'No feedback provided.');
 
     if (Number.isNaN(score)) {
       score = heuristicScore(answer, feedback);

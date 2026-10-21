@@ -58,10 +58,11 @@ const Footer = () => {
       toast.success("🎉 Subscribed! We'll be in touch soon.");
       setEmail("");
       setTimeout(() => setStatus("idle"), 3000);
-    } catch (err: any) {
+    } catch (err: unknown) {
       setStatus("error");
       console.error("Subscribe error:", err);
-      toast.error(err.message || "Something went wrong. Please try again.");
+      const message = err instanceof Error ? err.message : "Something went wrong. Please try again.";
+      toast.error(message);
       setTimeout(() => setStatus("idle"), 3000);
     }
   };

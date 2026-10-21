@@ -1,24 +1,23 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useContext } from 'react';
 import { CountryCode, detectCountry } from '@/lib/locale';
+import { AuthContext } from '@/contexts/AuthContext';
 
 const STORAGE_KEY = 'user_country_override';
 const COUNTRY_CHANGE_EVENT = 'user-country-changed';
 
-/** Safely try to read the auth context (works whether user is logged in or not) */
-function useSafeAuth() {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { useAuth } = require('@/contexts/AuthContext');
-    return useAuth();
-  } catch {
-    return null;
-  }
+interface LocaleUserCandidate {
+  phone?: string;
+  mobile?: string;
+  phoneNumber?: string;
+  mobileNumber?: string;
+  email?: string;
+  emailAddress?: string;
 }
 
 export function useUserLocale() {
-  const auth = useSafeAuth() as any;
+  const auth = useContext(AuthContext);
 
-  const user = auth?.user || auth?.profile || null;
+  const user = auth?.user as (LocaleUserCandidate | null | undefined);
   const phone =
     user?.phone || user?.mobile || user?.phoneNumber || user?.mobileNumber;
   const email = user?.email || user?.emailAddress;

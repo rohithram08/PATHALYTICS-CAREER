@@ -7,6 +7,7 @@ import { userKey } from '@/lib/userStorage';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useAuth } from '@/hooks/useAuth';
+import { API_URL } from '@/lib/api';
 
 interface Message {
   id: number;
@@ -15,7 +16,7 @@ interface Message {
   timestamp: Date;
 }
 
-const API_BASE = import.meta.env.VITE_CHATBOT_URL || 'http://localhost:8000';
+const API_BASE = import.meta.env.VITE_CHATBOT_URL || API_URL;
 
 const quickQuestions = [
   'What career is best for me?',
@@ -81,9 +82,13 @@ const Chatbot = () => {
     setIsTyping(true);
 
     try {
+      const token = localStorage.getItem('pathalytics_token');
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const res = await fetch(`${API_BASE}/api/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           message: messageText.trim(),
           history: newMessages.map((m) => ({

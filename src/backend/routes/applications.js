@@ -7,6 +7,7 @@ import fs from "fs";
 import { z } from "zod";
 import db from "../db.js";
 import { requireAuth, requireRole, requireVerifiedRecruiter } from "../middleware/auth.js";
+import { requireWhitelistedOrigin } from "../middleware/security.js";
 import { requireOwnJob } from "./jobs.js";
 import { sendNotification } from "../utils/emailService.js";
 import { checkStatusTransition, RECRUITER_SETTABLE_STATUSES } from "../utils/atsTransitions.js";
@@ -47,6 +48,7 @@ const upload = multer({
 // ── Apply to an internal (recruiter-posted) job ──────────────────────
 router.post(
   "/internal",
+  requireWhitelistedOrigin,
   requireAuth,
   requireRole("user"),
   upload.single("resume"),
@@ -278,12 +280,19 @@ router.get(
 // ── Recruiter: move a candidate to a new status and/or pipeline stage ─
 router.patch("/:id/status", requireAuth, requireRole("recruiter"), requireVerifiedRecruiter, async (req, res) => {
   try {
+    // notes added in P1.2 consolidation — the canonical replacement for
+    // the old POST /api/recruiter/candidates/:id/status endpoint's
+    // notes → cover_note capability. Kept fully independent of
+    // status/stageId: any one of the three alone is a valid request.
     const schema = z
       .object({
         status: z.enum(STATUS_VALUES).optional(),
         stageId: z.coerce.number().int().positive().optional(),
+        notes: z.string().max(2000).optional(),
       })
-      .refine((d) => d.status || d.stageId, { message: "Provide status and/or stageId" });
+      .refine((d) => d.status || d.stageId || d.notes !== undefined, {
+        message: "Provide status, stageId, and/or notes",
+      });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten() });
@@ -321,6 +330,8 @@ router.patch("/:id/status", requireAuth, requireRole("recruiter"), requireVerifi
 
     const newStatus = parsed.data.status ?? application.status;
     const newStageId = parsed.data.stageId ?? application.current_stage_id;
+    const hasAtsChange = parsed.data.status !== undefined || parsed.data.stageId !== undefined;
+    const hasNotes = parsed.data.notes !== undefined;
 
     if (parsed.data.status) {
       const transition = checkStatusTransition(application.status, parsed.data.status);
@@ -332,16 +343,39 @@ router.patch("/:id/status", requireAuth, requireRole("recruiter"), requireVerifi
     const conn = await db.getConnection();
     try {
       await conn.beginTransaction();
-      await conn.query(
-        "UPDATE applications SET status = ?, current_stage_id = ? WHERE id = ?",
-        [newStatus, newStageId, req.params.id]
-      );
-      await conn.query(
-        `INSERT INTO application_status_history
-           (application_id, from_status, to_status, from_stage_id, to_stage_id, changed_by)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [req.params.id, application.status, newStatus, application.current_stage_id, newStageId, req.user.id]
-      );
+
+      if (hasAtsChange && hasNotes) {
+        await conn.query(
+          "UPDATE applications SET status = ?, current_stage_id = ?, cover_note = ? WHERE id = ?",
+          [newStatus, newStageId, parsed.data.notes, req.params.id]
+        );
+        await conn.query(
+          `INSERT INTO application_status_history
+             (application_id, from_status, to_status, from_stage_id, to_stage_id, changed_by)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [req.params.id, application.status, newStatus, application.current_stage_id, newStageId, req.user.id]
+        );
+      } else if (hasAtsChange) {
+        await conn.query(
+          "UPDATE applications SET status = ?, current_stage_id = ? WHERE id = ?",
+          [newStatus, newStageId, req.params.id]
+        );
+        await conn.query(
+          `INSERT INTO application_status_history
+             (application_id, from_status, to_status, from_stage_id, to_stage_id, changed_by)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [req.params.id, application.status, newStatus, application.current_stage_id, newStageId, req.user.id]
+        );
+      } else {
+        // notes-only: nothing ATS-relevant changed, so no history row and
+        // no "your status changed" notification below — either would be
+        // misleading for a request that only updated a text note.
+        await conn.query(
+          "UPDATE applications SET cover_note = ? WHERE id = ?",
+          [parsed.data.notes, req.params.id]
+        );
+      }
+
       await conn.commit();
     } catch (err) {
       await conn.rollback();
@@ -350,30 +384,32 @@ router.patch("/:id/status", requireAuth, requireRole("recruiter"), requireVerifi
       conn.release();
     }
 
-    // Both sides get notified on every status update, as specified —
-    // the candidate hears their status changed, the recruiter gets a
-    // confirmation of the change they just made.
-    sendNotification("application_status_changed", {
-      to: application.candidate_email,
-      userId: application.user_id,
-      role: "user",
-      applicationId: application.id,
-      jobId: application.job_id,
-      jobTitle: application.job_title,
-      status: newStatus,
-      stageName,
-    });
-    sendNotification("application_status_update_confirmation", {
-      to: application.recruiter_email,
-      userId: req.user.id,
-      role: "recruiter",
-      applicationId: application.id,
-      jobId: application.job_id,
-      candidateName: application.candidate_name,
-      jobTitle: application.job_title,
-      status: newStatus,
-      stageName,
-    });
+    if (hasAtsChange) {
+      // Both sides get notified on every real status/stage change, as
+      // specified — the candidate hears their status changed, the
+      // recruiter gets a confirmation of the change they just made.
+      sendNotification("application_status_changed", {
+        to: application.candidate_email,
+        userId: application.user_id,
+        role: "user",
+        applicationId: application.id,
+        jobId: application.job_id,
+        jobTitle: application.job_title,
+        status: newStatus,
+        stageName,
+      });
+      sendNotification("application_status_update_confirmation", {
+        to: application.recruiter_email,
+        userId: req.user.id,
+        role: "recruiter",
+        applicationId: application.id,
+        jobId: application.job_id,
+        candidateName: application.candidate_name,
+        jobTitle: application.job_title,
+        status: newStatus,
+        stageName,
+      });
+    }
 
     return res.json({ message: "Application updated", status: newStatus, stageName });
   } catch (err) {

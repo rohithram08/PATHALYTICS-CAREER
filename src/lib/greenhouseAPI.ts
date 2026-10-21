@@ -47,7 +47,15 @@ async function fetchOneCompany(
     const res = await fetch(`${BOARDS_BASE}/${slug}/jobs`);
     if (!res.ok) return [];
     const data = await res.json();
-    return (data.jobs || []).map((j: any) => ({
+    return (data.jobs || []).map((j: {
+      id: number;
+      title: string;
+      absolute_url: string;
+      location?: { name: string };
+      departments?: Array<{ id: number; name: string }>;
+      offices?: Array<{ id: number; name: string }>;
+      updated_at: string;
+    }) => ({
       id: j.id,
       title: j.title,
       absolute_url: j.absolute_url,

@@ -73,9 +73,9 @@ const ForgotPassword = () => {
         description: 'Check your email for the 6-digit verification code.',
       });
       setStep('otp');
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast.error('Error', {
-        description: error?.message || 'Unable to send OTP',
+        description: error instanceof Error ? error.message : 'Unable to send OTP',
       });
     } finally {
       setIsLoading(false);
@@ -91,9 +91,9 @@ const ForgotPassword = () => {
       toast.success('OTP Resent', {
         description: 'A new verification code has been sent to your email.',
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast.error('Error', {
-        description: error?.message || 'Unable to resend OTP',
+        description: error instanceof Error ? error.message : 'Unable to resend OTP',
       });
     } finally {
       setIsLoading(false);

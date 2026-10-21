@@ -58,6 +58,7 @@ const Settings                    = lazy(() => import("./pages/Settings"));
 const ChangePassword              = lazy(() => import("./pages/ChangePassword"));
 const TwoFactorAuth               = lazy(() => import("./pages/TwoFactorAuth"));
 const CandidateProfileSetup       = lazy(() => import("./pages/CandidateProfileSetup"));
+const ResumeBuilder               = lazy(() => import("./pages/ResumeBuilder"));
 
 // Recruiter
 const RecruiterDashboard          = lazy(() => import("./pages/recruiter/RecruiterDashboard"));
@@ -163,6 +164,7 @@ const App = () => (
                     <Route path="/two-factor-auth"                element={<TwoFactorAuth />} />
                     <Route path="/career-tips/:id"                element={<CareerTipDetail />} />
                     <Route path="/career-profile"                 element={<CandidateProfileSetup />} />
+                    <Route path="/resume-builder"                 element={<ResumeBuilder />} />
                     <Route path="/jobs"                           element={<Jobs />} />
                   </Route>
 

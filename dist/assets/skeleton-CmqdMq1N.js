@@ -1,1 +1,0 @@
-import{j as t,Q as n}from"./index-DvZLFowe.js";function m({className:e,...s}){return t.jsxDEV("div",{className:n("animate-pulse rounded-md bg-muted",e),...s},void 0,!1,{fileName:"E:/projects/pathalytics/src/components/ui/skeleton.tsx",lineNumber:4,columnNumber:10},this)}export{m as S};

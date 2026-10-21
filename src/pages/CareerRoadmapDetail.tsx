@@ -29,6 +29,7 @@ import { useUserLocale } from '@/hooks/useUserLocale';
 import { CountrySelector } from '@/components/CountrySelector';
 import { getCountryInfo } from '@/lib/locale';
 import { localizeSalaryString } from '@/lib/localeSalary';
+import { API_URL } from '@/lib/api';
 
 const CareerRoadmapDetail = () => {
   const { careerId } = useParams<{ careerId: string }>();
@@ -45,7 +46,7 @@ const CareerRoadmapDetail = () => {
   const [experienceLevel, setExperienceLevel] = useState<'fresher' | 'experienced'>('fresher');
   const [expandedSteps, setExpandedSteps] = useState<number[]>([]);
   const [websiteUrl, setWebsiteUrl] = useState('');
-  const [analysisResult, setAnalysisResult] = useState<any>(null);
+  const [analysisResult, setAnalysisResult] = useState<Record<string, unknown> | null>(null);
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
 
   const roadmap = roadmaps.find((r) => r.id === careerId);
@@ -105,9 +106,13 @@ const CareerRoadmapDetail = () => {
     setAnalysisResult(null);
 
     try {
-      const res = await fetch('http://localhost:8000/api/chat', {
+      const token = localStorage.getItem('pathalytics_token');
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch(`${API_URL}/api/chatbot/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ message: `Analyze this website: ${websiteUrl}` }),
       });
 

@@ -14,17 +14,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Badge }  from "@/components/ui/badge";
 import { toast }  from "sonner";
-
-const API_BASE  = import.meta.env.VITE_API_URL || "http://localhost:5000";
-const TOKEN_KEY = "pathalytics_token";
-
-function authHeaders() {
-  const token = localStorage.getItem(TOKEN_KEY) || "";
-  return {
-    "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
-}
+import { recruiterApi, ApiError, type RecruiterJobsAltInput } from "@/lib/api";
 
 const EMP_TYPES   = ["full-time", "part-time", "contract", "internship", "remote"] as const;
 const EXP_LEVELS  = ["entry", "mid", "senior", "lead", "director"] as const;
@@ -57,24 +47,26 @@ export default function RecruiterJobForm() {
     if (!isEdit) return;
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/recruiter/jobs/${id}`, {
-          credentials: "include", headers: authHeaders(),
-        });
-        if (res.status === 401) { navigate("/login"); return; }
-        if (!res.ok) throw new Error("Job not found");
-        const job = await res.json();
+        // jobs.get() (GET /api/jobs/:id, jobs.js) is the existing,
+        // already-ownership-enforced endpoint EditJob.tsx also uses — see
+        // RecruiterJobsAltDetail's comment in api.ts for why this replaced
+        // the nonexistent GET /api/recruiter/jobs/:id. Different field
+        // names than this form uses, so map them the same way
+        // recruiter.js's own job-list endpoint already does server-side.
+        const job = await recruiterApi.jobs.get(id!);
         setForm({
           title: job.title || "", description: job.description || "",
           location: job.location || "",
           salary_min: job.salary_min ? String(job.salary_min) : "",
           salary_max: job.salary_max ? String(job.salary_max) : "",
-          employment_type: job.employment_type || "",
+          employment_type: job.job_type || "",
           experience_level: job.experience_level || "",
-          deadline: job.deadline ? job.deadline.slice(0, 10) : "",
-          is_active: job.is_active !== 0,
-          skills: Array.isArray(job.skills) ? job.skills : (job.skills ? JSON.parse(job.skills) : []),
+          deadline: job.closed_at ? job.closed_at.slice(0, 10) : "",
+          is_active: job.status === "published",
+          skills: Array.isArray(job.skills) ? job.skills : (job.skills ? JSON.parse(job.skills as string) : []),
         });
       } catch (err) {
+        if (err instanceof ApiError && err.status === 401) { navigate("/login"); return; }
         toast.error(err instanceof Error ? err.message : "Failed to load job");
         navigate("/recruiter/jobs");
       } finally {
@@ -99,7 +91,7 @@ export default function RecruiterJobForm() {
     if (!form.title.trim() || !form.description.trim()) {
       toast.error("Title and description are required"); return;
     }
-    const payload = {
+    const payload: RecruiterJobsAltInput = {
       title: form.title.trim(), description: form.description.trim(),
       location: form.location.trim() || undefined,
       salary_min: form.salary_min ? Number(form.salary_min) : undefined,
@@ -111,23 +103,15 @@ export default function RecruiterJobForm() {
     };
     setSaving(true);
     try {
-      const res = await fetch(
-        isEdit ? `${API_BASE}/api/recruiter/jobs/${id}` : `${API_BASE}/api/recruiter/jobs`,
-        {
-          method: isEdit ? "PUT" : "POST",
-          credentials: "include",
-          headers: authHeaders(),
-          body: JSON.stringify(payload),
-        }
-      );
-      if (res.status === 401) { navigate("/login"); return; }
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        throw new Error((d as { message?: string }).message || "Failed to save");
+      if (isEdit) {
+        await recruiterApi.recruiterJobs.update(id!, payload);
+      } else {
+        await recruiterApi.recruiterJobs.create(payload);
       }
       toast.success(isEdit ? "Job updated" : "Job posted successfully");
       navigate("/recruiter/jobs");
     } catch (err) {
+      if (err instanceof ApiError && err.status === 401) { navigate("/login"); return; }
       toast.error(err instanceof Error ? err.message : "Failed to save job");
     } finally {
       setSaving(false);

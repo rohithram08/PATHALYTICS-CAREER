@@ -25,9 +25,19 @@ export function isTurnstileConfigured() {
  */
 export async function verifyTurnstile(req, res, next) {
   if (!isTurnstileConfigured()) {
+    if (process.env.NODE_ENV === "production") {
+      console.error(
+        "❌ CRITICAL SECURITY ERROR: TURNSTILE_SECRET_KEY is not configured in production. " +
+        "Failing closed to prevent bot bypass."
+      );
+      return res.status(503).json({
+        message: "Bot-verification is mandatory in production but unconfigured. Contact administrator.",
+      });
+    }
+
     if (!warnedOnce) {
       console.warn(
-        "⚠️  TURNSTILE_SECRET_KEY not set — bot-protection check is DISABLED. " +
+        "⚠️  TURNSTILE_SECRET_KEY not set — bot-protection check is DISABLED in development. " +
         "Set it in your .env to enforce Turnstile on auth forms."
       );
       warnedOnce = true;

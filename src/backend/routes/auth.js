@@ -62,9 +62,10 @@ const JWT_SECRET = process.env.JWT_SECRET;
 // asks for under "Bot Protection". Keyed by IP; login/signup are also
 // worth keying by email to stop a distributed attack on one account,
 // so we consume from both keyspaces.
-const authLimiterByIp = new RateLimiterMemory({ points: 10, duration: 15 * 60 });
-const authLimiterByEmail = new RateLimiterMemory({ points: 8, duration: 15 * 60 });
-const otpLimiterByIp = new RateLimiterMemory({ points: 8, duration: 60 * 60 });
+const isProd = process.env.NODE_ENV === "production";
+const authLimiterByIp = new RateLimiterMemory({ points: isProd ? 10 : 500, duration: 15 * 60 });
+const authLimiterByEmail = new RateLimiterMemory({ points: isProd ? 8 : 500, duration: 15 * 60 });
+const otpLimiterByIp = new RateLimiterMemory({ points: isProd ? 8 : 200, duration: 60 * 60 });
 
 async function slidingAuthLimiter(req, res, next) {
   try {

@@ -1,86 +1,47 @@
 // src/backend/middleware/security.js
 // ─────────────────────────────────────────────────────────────
-// Centralised security middleware stack
+// Route-level security utilities actually used by the app.
 //
-// Layers:
-//  1. Helmet – HTTP security headers (CSP, HSTS, X-Frame-Options…)
-//  2. CORS  – whitelist origins, allow credentials
-//  3. Rate limiting – global + per-route
-//  4. Input sanitisation – trim strings, strip HTML, block SQLi patterns
-//  5. CSRF token – double-submit cookie for state-changing routes
-//  6. Request-size cap – prevent payload-based DoS
-//  7. Audit logger – security-relevant events to console (replace with real logger in prod)
+// This file used to describe itself as a 7-layer "centralised security
+// stack" with a single applySecurityMiddleware(app) composer — but only
+// 3 of those ~10 exports were ever imported anywhere; the rest (Helmet,
+// CORS, a global rate limiter, otpLimiter, CSRF, a manual request-size
+// cap, an audit logger) were fully dead code, never mounted. That gap
+// between what this file claimed to provide and what was actually
+// protecting the app in production was itself a risk — exactly the
+// kind of place a future read (human or Claude) would trust at face
+// value. Trimmed in the P0.3 pass (2026-08-13) to only what's genuinely
+// wired into a route:
+//
+//  - sanitiseInput            — mounted globally in server.js
+//  - authLimiter              — POST /user/change-password, DELETE /user/account
+//  - uploadLimiter            — the multipart upload routes
+//  - requireWhitelistedOrigin — new in this pass, see below
+//
+// Helmet, CORS, and global rate limiting are live in server.js's own
+// inline config, not here — that's the real, active stack.
+//
+// If you're looking for CSRF protection: it doesn't exist, on purpose.
+// The JSON-based API surface doesn't need it — a strict CORS origin
+// whitelist plus express.json() only parsing application/json means a
+// forged cross-origin JSON request never gets past the browser's CORS
+// preflight in the first place. The one place that structural
+// protection doesn't reach is multipart/form-data uploads, which are
+// CORS-"simple" and skip preflight entirely — that gets
+// requireWhitelistedOrigin below instead of a full CSRF token scheme,
+// which would need carve-outs for Bearer-only clients that don't exist
+// in this codebase yet.
 // ─────────────────────────────────────────────────────────────
 
-import helmet from "helmet";
-import cors from "cors";
 import rateLimit from "express-rate-limit";
 import xss from "xss";
-import crypto from "crypto";
 
-// ── 1. Helmet ─────────────────────────────────────────────────
-export const helmetMiddleware = helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "https://accounts.google.com"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      fontSrc: ["'self'", "https://fonts.gstatic.com"],
-      imgSrc: ["'self'", "data:", "https:", "blob:"],
-      connectSrc: ["'self'", "https://api.groq.com", "https://api.adzuna.com"],
-      frameSrc: ["'none'"],
-      objectSrc: ["'none'"],
-    },
-  },
-  hsts: {
-    maxAge: 31536000,
-    includeSubDomains: true,
-    preload: true,
-  },
-  referrerPolicy: { policy: "strict-origin-when-cross-origin" },
-  crossOriginEmbedderPolicy: false, // allow Google OAuth iframe
-});
-
-// ── 2. CORS ───────────────────────────────────────────────────
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || process.env.FRONTEND_URL || "http://localhost:5173")
-  .split(",")
-  .map((o) => o.trim());
-
-export const corsMiddleware = cors({
-  origin(origin, cb) {
-    // Allow server-to-server / curl / Postman (no origin header)
-    if (!origin) return cb(null, true);
-    if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-    cb(new Error(`CORS: origin '${origin}' is not allowed`));
-  },
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-CSRF-Token"],
-  exposedHeaders: ["X-RateLimit-Remaining"],
-  maxAge: 86400,
-});
-
-// ── 3. Rate limiters ──────────────────────────────────────────
-export const globalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 min
-  max: 300,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: (req) => process.env.NODE_ENV === "test",
-  message: { message: "Too many requests. Please slow down." },
-});
-
+// ── Rate limiters ────────────────────────────────────────────
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
   message: { message: "Too many auth attempts. Try again in 15 minutes." },
   skipSuccessfulRequests: true,
-});
-
-export const otpLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  max: 3,
-  message: { message: "Too many OTP requests. Try again later." },
 });
 
 export const uploadLimiter = rateLimit({
@@ -89,7 +50,7 @@ export const uploadLimiter = rateLimit({
   message: { message: "Upload limit reached. Try again in an hour." },
 });
 
-// ── 4. Input sanitisation ─────────────────────────────────────
+// ── Input sanitisation ───────────────────────────────────────
 // NOTE: this used to also block requests whose body/query contained
 // words like SELECT/FROM/WHERE or a semicolon, as a SQL-injection
 // guard. That check has been removed — it wasn't providing real
@@ -143,68 +104,40 @@ export function sanitiseInput(req, res, next) {
   next();
 }
 
-// ── 5. CSRF ───────────────────────────────────────────────────
-const CSRF_COOKIE = "csrf_token";
-const CSRF_HEADER = "x-csrf-token";
-const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+// ── Origin allowlist for CORS-"simple" routes ────────────────
+// multipart/form-data requests never trigger a CORS preflight, so the
+// browser never gets a chance to block a cross-origin submission the
+// way it does for the rest of the API. This mirrors server.js's CORS
+// origin whitelist (same env vars, same Vercel-preview pattern) rather
+// than importing it, since touching server.js/CORS was out of scope
+// for this pass — worth consolidating into one shared source of truth
+// if server.js ever gets touched for other reasons.
+const UPLOAD_PROD_ORIGIN    = process.env.FRONTEND_URL || "https://pathalytics.vercel.app";
+const UPLOAD_VERCEL_PATTERN = /^https:\/\/pathalytics(-[a-z0-9-]+)?\.vercel\.app$/;
+const UPLOAD_EXTRA_ORIGINS  = (process.env.EXTRA_ORIGINS || "")
+  .split(",").map((o) => o.trim()).filter(Boolean);
 
-export function csrfProtection(req, res, next) {
-  if (SAFE_METHODS.has(req.method)) return next();
+export function requireWhitelistedOrigin(req, res, next) {
+  const origin = req.headers.origin;
 
-  const cookieToken = req.cookies?.[CSRF_COOKIE];
-  const headerToken = req.headers[CSRF_HEADER];
+  // No Origin header at all means this isn't a cross-site browser
+  // request (curl, server-to-server, some same-origin cases) — the
+  // same carve-out server.js's CORS check makes. Safe here for the
+  // same reason it's safe there: a real cross-site browser request
+  // always carries this header — the browser sets it, a page can't
+  // omit or forge it.
+  if (!origin) return next();
 
-  if (!cookieToken || !headerToken || cookieToken !== headerToken) {
-    auditLog("CSRF_REJECTED", req);
-    return res.status(403).json({ message: "Invalid CSRF token" });
+  const allowed =
+    origin === UPLOAD_PROD_ORIGIN ||
+    UPLOAD_VERCEL_PATTERN.test(origin) ||
+    UPLOAD_EXTRA_ORIGINS.includes(origin) ||
+    origin === "http://localhost:5173" ||
+    origin === "http://localhost:8080" ||
+    origin === "http://localhost:3000";
+
+  if (!allowed) {
+    return res.status(403).json({ message: "Origin not allowed" });
   }
   next();
-}
-
-export function setCSRFToken(req, res, next) {
-  if (!req.cookies?.[CSRF_COOKIE]) {
-    const token = crypto.randomBytes(32).toString("hex");
-    res.cookie(CSRF_COOKIE, token, {
-      httpOnly: false, // JS must read it to put in header
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      maxAge: 24 * 60 * 60 * 1000,
-    });
-  }
-  next();
-}
-
-// ── 6. Request-size cap (express.json handles this but we enforce here too) ─
-export function requestSizeCap(req, res, next) {
-  const contentLength = parseInt(req.headers["content-length"] || "0");
-  const MAX_BYTES = 5 * 1024 * 1024; // 5 MB
-  if (contentLength > MAX_BYTES) {
-    return res.status(413).json({ message: "Request body too large" });
-  }
-  next();
-}
-
-// ── 7. Audit logger ───────────────────────────────────────────
-export function auditLog(event, req, extra = {}) {
-  const entry = {
-    ts: new Date().toISOString(),
-    event,
-    ip: req?.ip || "unknown",
-    method: req?.method,
-    path: req?.path,
-    userId: req?.user?.id,
-    ...extra,
-  };
-  // In production, pipe this to your structured log sink (Datadog, Sentry, etc.)
-  console.warn("[SECURITY]", JSON.stringify(entry));
-}
-
-// ── Compose: apply all in one call ────────────────────────────
-export function applySecurityMiddleware(app) {
-  app.use(helmetMiddleware);
-  app.use(corsMiddleware);
-  app.use(globalLimiter);
-  app.use(requestSizeCap);
-  app.use(sanitiseInput);
-  app.use(setCSRFToken);
 }

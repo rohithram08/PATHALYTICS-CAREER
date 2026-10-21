@@ -110,6 +110,31 @@ export async function requireAuth(req, res, next) {
   }
 }
 
+// ── Optional auth guard (attaches req.user if valid token present, never blocks) ──
+export async function optionalAuth(req, _res, next) {
+  const token = extractToken(req);
+  if (!token) return next();
+
+  try {
+    const payload = jwt.verify(token, JWT_SECRET, { algorithms: ["HS256"] });
+    const [rows] = await db.query(
+      "SELECT id, name, email, role, locked_until FROM users WHERE id = ?",
+      [payload.id]
+    );
+    if (rows.length && !(rows[0].locked_until && new Date(rows[0].locked_until) > new Date())) {
+      req.user = {
+        id: rows[0].id,
+        name: rows[0].name,
+        email: rows[0].email,
+        role: rows[0].role,
+      };
+    }
+  } catch {
+    // Invalid/expired token — proceed safely as guest
+  }
+  next();
+}
+
 // ── Role guard factory ────────────────────────────────────────
 export function requireRole(...roles) {
   return (req, res, next) => {
@@ -194,24 +219,6 @@ export async function checkRecruiterVerified(req) {
   const verification_status = await getRecruiterVerificationStatus(req.user.id);
   if (verification_status === "approved") return null;
   return verificationBlockResponse(verification_status);
-}
-
-// ── Optional auth (attaches user if token is valid, doesn't block) ──
-export async function optionalAuth(req, res, next) {
-  const token = extractToken(req);
-  if (!token) return next();
-
-  try {
-    const payload = jwt.verify(token, JWT_SECRET, { algorithms: ["HS256"] });
-    const [rows] = await db.query(
-      "SELECT id, name, email, role FROM users WHERE id = ?",
-      [payload.id]
-    );
-    if (rows.length) req.user = rows[0];
-  } catch {
-    // Silently ignore invalid token for optional routes
-  }
-  next();
 }
 
 // ── Resource ownership check ─────────────────────────────────

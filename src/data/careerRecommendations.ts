@@ -346,9 +346,17 @@ export interface UserPreferences {
 export interface RecommendationResult extends CareerRecommendation {
   matchScore: number;
   matchedSkills: string[];
+  missingSkills: string[];
   matchedInterests: string[];
   matchedPersonality: string[];
   matchedWorkStyle: string[];
+  readinessPercentage: number;
+  targetPreparationTimeline: string;
+  recommendedProjects: Array<{
+    title: string;
+    tech: string;
+    description: string;
+  }>;
   explanation: string[];
   /** Locale-formatted salary strings */
   salaryDisplay: {
@@ -360,14 +368,81 @@ export interface RecommendationResult extends CareerRecommendation {
   };
 }
 
+const CAREER_PROJECTS: Record<string, Array<{ title: string; tech: string; description: string }>> = {
+  'software-developer': [
+    { title: 'Full-Stack Issue Tracking & Scrum Tool', tech: 'TypeScript, React, Node.js, PostgreSQL', description: 'Design an end-to-end task management tool with JWT auth, role permissions, and GitHub webhook integration.' },
+    { title: 'High-Throughput API Gateway & Cache', tech: 'Node.js, Express, Redis, Docker', description: 'Build a reverse-proxy gateway with distributed rate limiting, cache invalidation, and metrics logging.' },
+  ],
+  'web-developer': [
+    { title: 'Interactive Analytics & SaaS Portal', tech: 'React, Tailwind CSS, Recharts, Vite', description: 'Responsive web platform featuring light/dark themes, accessible forms, and rich data visualization.' },
+    { title: 'Headless Content & Blog Engine', tech: 'Next.js / Vite, Markdown/MDX, REST API', description: 'Fast, SEO-optimized content platform with dynamic routing, search, and static site generation.' },
+  ],
+  'data-analyst': [
+    { title: 'E-Commerce Cohort & Churn Dashboard', tech: 'SQL, Python, Pandas, PowerBI / Tableau', description: 'Analyze customer transactional logs to reveal 90-day retention curves, LTV, and basket size trends.' },
+    { title: 'Marketing Attribution & ROI Modeling', tech: 'SQL, Python, Matplotlib, Seaborn', description: 'Build statistical models attributing multi-touch customer conversions to optimize ad spend.' },
+  ],
+  'data-scientist': [
+    { title: 'Predictive Customer Churn Pipeline', tech: 'Python, Scikit-Learn, XGBoost, FastAPI', description: 'Train, validate, and serve an ensemble ML model with feature importance (SHAP) explanations.' },
+    { title: 'NLP Sentiment & Entity Extraction Engine', tech: 'HuggingFace, PyTorch, Transformers', description: 'Fine-tune a lightweight BERT model to categorize customer feedback and ticket urgency.' },
+  ],
+  'cybersecurity-analyst': [
+    { title: 'Automated Vulnerability & Port Scanner', tech: 'Python, Nmap, Scapy, Docker', description: 'Construct a security scanning script that detects open ports, outdated SSL ciphers, and misconfigurations.' },
+    { title: 'Zero-Trust Role-Based Access Audit System', tech: 'Node.js, OAuth 2.0, OpenID Connect', description: 'Implement token revocation, anomalous login detection, and least-privilege permission validation.' },
+  ],
+  'cloud-engineer': [
+    { title: 'Multi-Region Terraform Infrastructure as Code', tech: 'Terraform, AWS/GCP, Docker, Nginx', description: 'Provision load balancers, auto-scaling groups, and private VPC networks with zero-downtime blue/green deployment.' },
+    { title: 'Kubernetes Microservices Observability Stack', tech: 'K8s, Prometheus, Grafana, Helm', description: 'Containerize and orchestrate a 3-tier microservice architecture with auto-healing and live alerting.' },
+  ],
+  'ui-ux-designer': [
+    { title: 'Design System & Component Library (Figma)', tech: 'Figma, Design Tokens, WCAG 2.1 AA', description: 'Comprehensive design system including typography scales, semantic color palettes, and responsive mobile mockups.' },
+    { title: 'Fintech Onboarding Redesign & Usability Testing', tech: 'User Research, Wireframing, Prototyping', description: 'Conduct usability interviews with 5 participants, iterate wireframes, and increase task completion rate.' },
+  ],
+  'mobile-app-developer': [
+    { title: 'Cross-Platform Habit & Goal Tracker', tech: 'React Native / Flutter, SQLite, Push Notifications', description: 'Offline-first mobile application with local caching, streak tracking, and interactive calendar views.' },
+    { title: 'Location-Based Event Finder App', tech: 'React Native, Google Maps API, REST', description: 'Interactive mobile app that queries nearby venues, displays real-time directions, and saves favorites.' },
+  ],
+};
+
+function getProjectsForCareer(careerId: string, careerTitle: string, careerSkills: string[]) {
+  if (CAREER_PROJECTS[careerId]) return CAREER_PROJECTS[careerId];
+  return [
+    {
+      title: `${careerTitle} Capstone Project`,
+      tech: careerSkills.slice(0, 3).join(', ') || 'Core Technologies',
+      description: `Build a production-quality application demonstrating practical competency in ${careerSkills.slice(0, 2).join(' and ') || 'this field'}.`,
+    },
+    {
+      title: 'Industry Portfolio Case Study',
+      tech: 'GitHub, CI/CD, Documentation',
+      description: 'Document architecture, design decisions, unit tests, and live deployment link for recruiter evaluation.',
+    },
+  ];
+}
+
+/**
+ * Calculates deterministic career recommendations and calibrated readiness scores.
+ *
+ * Scoring Model Assumptions & Methodology:
+ * - Dimensional Weights: Skills (50%), Interests (25%), Personality (15%), Work Style (10%).
+ * - Bounded Calibration:
+ *   - Lower bound (20%): Reflects foundational transferable aptitudes; prevents demotivating zero-scores.
+ *   - Upper bound (98%): Reflects practical limits; no algorithmic assessment guarantees hiring without interviews.
+ * - Limitation & Nature: This is a heuristic curriculum-planning and readiness score intended for
+ *   guided roadmap progression and skill-gap closure, NOT an empirical or scientific probability of employment.
+ *
+ * @param preferences User traits, skills, and locale preferences (handles null/undefined gracefully)
+ * @returns Sorted recommendation results with skill gaps, timelines, and capstone briefs
+ */
 export function getCareerRecommendations(
-  preferences: UserPreferences
+  preferences?: UserPreferences | null
 ): RecommendationResult[] {
+  if (!preferences || typeof preferences !== 'object') return [];
+
+  const userSkills = Array.isArray(preferences.skills) ? preferences.skills : [];
+  const userInterests = Array.isArray(preferences.interests) ? preferences.interests : [];
+  const userPersonality = Array.isArray(preferences.personality) ? preferences.personality : [];
+  const userWorkStyle = Array.isArray(preferences.workStyle) ? preferences.workStyle : [];
   const {
-    skills: userSkills = [],
-    interests: userInterests = [],
-    personality: userPersonality = [],
-    workStyle: userWorkStyle = [],
     contact,
     experience = 'fresher',
     country: manualCountry,
@@ -392,9 +467,34 @@ export function getCareerRecommendations(
 
   const results: RecommendationResult[] = careers.map((career) => {
     const matchedSkills = career.skills.filter((s) => userSkills.includes(s));
+    const missingSkills = career.skills.filter((s) => !userSkills.includes(s));
     const matchedInterests = career.interests.filter((i) => userInterests.includes(i));
     const matchedPersonality = career.personality.filter((p) => userPersonality.includes(p));
     const matchedWorkStyle = career.workStyle.filter((w) => userWorkStyle.includes(w));
+
+    // Calibrated readiness formula
+    const skillsRatio = career.skills.length > 0 ? matchedSkills.length / career.skills.length : 1;
+    const interestsRatio = career.interests.length > 0 ? matchedInterests.length / career.interests.length : 0.5;
+    const personalityRatio = career.personality.length > 0 ? matchedPersonality.length / career.personality.length : 0.5;
+    const workStyleRatio = career.workStyle.length > 0 ? matchedWorkStyle.length / career.workStyle.length : 0.5;
+
+    const rawReadiness = Math.round(
+      (skillsRatio * 0.50 +
+       interestsRatio * 0.25 +
+       personalityRatio * 0.15 +
+       workStyleRatio * 0.10) * 100
+    );
+
+    const readinessPercentage = Math.min(98, Math.max(20, rawReadiness));
+
+    let targetPreparationTimeline = '3–6 months structured roadmap';
+    if (readinessPercentage >= 80) {
+      targetPreparationTimeline = 'Ready to interview & build portfolio';
+    } else if (readinessPercentage >= 60) {
+      targetPreparationTimeline = '1–2 months targeted practice';
+    } else if (readinessPercentage >= 40) {
+      targetPreparationTimeline = '2–4 months skill development';
+    }
 
     const matchScore =
       matchedSkills.length * 3 +
@@ -403,14 +503,21 @@ export function getCareerRecommendations(
       matchedWorkStyle.length * 1;
 
     const explanation: string[] = [];
-    if (matchedSkills.length)
-      explanation.push(`Your skills in ${matchedSkills.join(', ')} fit this role.`);
-    if (matchedInterests.length)
-      explanation.push(`Matches your interest in ${matchedInterests.join(' and ').toLowerCase()}.`);
-    if (matchedPersonality.length)
-      explanation.push(`Suits your ${matchedPersonality.join(', ').toLowerCase()} personality.`);
-    if (matchedWorkStyle.length)
-      explanation.push(`Aligns with your preference for ${matchedWorkStyle.join(', ').toLowerCase()} work.`);
+    if (matchedSkills.length) {
+      explanation.push(`Strong foundation in ${matchedSkills.join(', ')}.`);
+    }
+    if (missingSkills.length) {
+      explanation.push(`Growth opportunity: Learn ${missingSkills.join(', ')} to become fully job-ready.`);
+    }
+    if (matchedInterests.length) {
+      explanation.push(`Aligns with your interest in ${matchedInterests.join(' and ').toLowerCase()}.`);
+    }
+    if (matchedPersonality.length) {
+      explanation.push(`Complements your ${matchedPersonality.join(', ').toLowerCase()} problem-solving style.`);
+    }
+    if (matchedWorkStyle.length) {
+      explanation.push(`Matches your preference for ${matchedWorkStyle.join(', ').toLowerCase()} environments.`);
+    }
 
     const both = formatSalaryBoth(career.salary, country);
     const salaryDisplay = {
@@ -418,19 +525,25 @@ export function getCareerRecommendations(
       primary: formatSalary(career.salary, country, experience),
     };
 
+    const recommendedProjects = getProjectsForCareer(career.id, career.title, career.skills);
+
     return {
       ...career,
       matchScore,
       matchedSkills,
+      missingSkills,
       matchedInterests,
       matchedPersonality,
       matchedWorkStyle,
+      readinessPercentage,
+      targetPreparationTimeline,
+      recommendedProjects,
       explanation,
       salaryDisplay,
     };
   });
 
   return results
-    .filter((r) => r.matchScore > 0)
-    .sort((a, b) => b.matchScore - a.matchScore);
+    .filter((r) => r.matchScore > 0 || r.readinessPercentage > 30)
+    .sort((a, b) => b.readinessPercentage - a.readinessPercentage || b.matchScore - a.matchScore);
 }

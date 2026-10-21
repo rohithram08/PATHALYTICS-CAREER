@@ -12,11 +12,15 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { recruiterApi, type RecruiterPipelineCandidate } from "@/lib/api";
 
 const STAGES = ["applied", "screening", "interview", "offer", "hired", "rejected"] as const;
 type Stage = (typeof STAGES)[number];
+
+// The shared API type declares `stage` as a generic string (safer at the
+// wire level); this page always renders one of the known STAGES, so
+// narrow it locally rather than casting at every STAGE_META lookup.
+type Candidate = Omit<RecruiterPipelineCandidate, "stage"> & { stage: Stage };
 
 const STAGE_META: Record<Stage, { label: string; color: string; bg: string }> = {
   applied:   { label: "Applied",   color: "text-blue-700",   bg: "bg-blue-50 border-blue-200" },
@@ -26,35 +30,6 @@ const STAGE_META: Record<Stage, { label: string; color: string; bg: string }> = 
   hired:     { label: "Hired",     color: "text-green-700",  bg: "bg-green-50 border-green-200" },
   rejected:  { label: "Rejected",  color: "text-red-700",    bg: "bg-red-50 border-red-200" },
 };
-
-interface Candidate {
-  application_id: number;
-  user_id: number;
-  name: string;
-  email: string;
-  avatar_url?: string;
-  stage: Stage;
-  applied_at: string;
-  job_title: string;
-  job_id: number;
-}
-
-async function apiFetch(path: string, opts?: RequestInit) {
-  // Module-level helper, not a component — can't call useAuth() here.
-  // Reads the same localStorage key AuthContext.tsx writes to (must stay
-  // in sync with TOKEN_KEY there), same approach src/lib/api.ts uses.
-  const token = localStorage.getItem("pathalytics_token");
-  const res = await fetch(`${API_BASE}${path}`, {
-    credentials: "include",
-    ...opts,
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(opts?.headers || {}),
-    },
-  });
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Request failed");
-  return res.json();
-}
 
 function CandidateCard({ candidate, onStatusChange }: {
   candidate: Candidate;
@@ -238,11 +213,8 @@ export default function RecruiterCandidates() {
   const fetchCandidates = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ page: String(page), limit: "30" });
-      if (q)     params.set("q", q);
-      if (stage) params.set("stage", stage);
-      const data = await apiFetch(`/api/recruiter/candidates?${params}`);
-      setCandidates(data.candidates);
+      const data = await recruiterApi.candidates.pipeline({ q, stage, page, limit: 30 });
+      setCandidates(data.candidates as Candidate[]);
       setTotal(data.total);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to load candidates";
@@ -257,11 +229,10 @@ export default function RecruiterCandidates() {
 
   const handleStatusChange = async (applicationId: number, newStage: Stage) => {
     try {
-      await apiFetch(`/api/recruiter/candidates/${applicationId}/status`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ stage: newStage }),
-      });
+      // P1.2: migrated from candidates.updateStage() (now removed) to the
+      // canonical applications.updateStatus() — same net effect, stage
+      // maps directly onto status.
+      await recruiterApi.applications.updateStatus(applicationId, { status: newStage });
       setCandidates((prev) =>
         prev.map((c) =>
           c.application_id === applicationId ? { ...c, stage: newStage } : c

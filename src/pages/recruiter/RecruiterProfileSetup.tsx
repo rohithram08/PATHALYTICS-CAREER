@@ -14,13 +14,21 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { useAuth } from "@/hooks/useAuth";
-
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import {
+  recruiterApi,
+  ApiError,
+  type RecruiterProfile,
+  type RecruiterDocument as UploadedDocument,
+} from "@/lib/api";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const COMPANY_SIZES = ["1-10", "11-50", "51-200", "201-500", "500+"] as const;
+// Must exactly match the backend's Zod enum in routes/recruiter.js's
+// PUT /profile — "500+" (the old value here) isn't a valid backend
+// value and always failed validation on save. Fixed in P1.1
+// stabilization: backend contract left as-is, frontend corrected to
+// offer only what it actually accepts.
+const COMPANY_SIZES = ["1-10", "11-50", "51-200", "201-500", "501-1000", "1000+"] as const;
 
 const DOCUMENT_TYPES = [
   { value: "company_registration", label: "Company Registration Certificate" },
@@ -60,24 +68,6 @@ const ALLOWED_EXTENSIONS = ".pdf,.jpg,.jpeg,.png,.webp";
 const MAX_FILE_SIZE_MB   = 5;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-
-interface RecruiterProfile {
-  company_name:        string;
-  company_size:        string;
-  industry:            string;
-  designation:         string;
-  website:             string;
-  verification_status: VerificationStatus;
-  rejection_reason?:   string;
-}
-
-interface UploadedDocument {
-  id:            number;
-  document_type: DocTypeValue;
-  file_name:     string;
-  uploaded_at:   string;
-  status:        VerificationStatus;
-}
 
 const DEFAULT_PROFILE: RecruiterProfile = {
   company_name:        "",
@@ -169,7 +159,6 @@ function DocumentRow({
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function RecruiterProfileSetup() {
-  const { token } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Profile state
@@ -191,32 +180,28 @@ export default function RecruiterProfileSetup() {
   const loadProfile = useCallback(async () => {
     setLoadingProfile(true);
     try {
-      const res = await fetch(`${API_BASE}/api/recruiter/profile`, {
-        credentials: "include",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) setProfile(await res.json());
-    } catch {
-      toast.error("Could not load profile");
+      setProfile(await recruiterApi.profile.get());
+    } catch (err) {
+      // Original only handled `if (res.ok)` — a non-ok response (e.g. no
+      // profile row yet for a brand-new recruiter) was silently ignored,
+      // defaults stayed. Only a network-level failure showed this toast.
+      // Preserved exactly: ApiError (bad status) stays silent here.
+      if (!(err instanceof ApiError)) toast.error("Could not load profile");
     } finally {
       setLoadingProfile(false);
     }
-  }, [token]);
+  }, []);
 
   const loadDocuments = useCallback(async () => {
     setLoadingDocs(true);
     try {
-      const res = await fetch(`${API_BASE}/api/recruiter/documents`, {
-        credentials: "include",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) setDocuments(await res.json());
-    } catch {
-      toast.error("Could not load documents");
+      setDocuments(await recruiterApi.documents.list());
+    } catch (err) {
+      if (!(err instanceof ApiError)) toast.error("Could not load documents");
     } finally {
       setLoadingDocs(false);
     }
-  }, [token]);
+  }, []);
 
   useEffect(() => {
     loadProfile();
@@ -232,19 +217,13 @@ export default function RecruiterProfileSetup() {
     }
     setSavingProfile(true);
     try {
-      const res = await fetch(`${API_BASE}/api/recruiter/profile`, {
-        method:      "PATCH",
-        credentials: "include",
-        headers:     { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          company_name: profile.company_name.trim(),
-          company_size: profile.company_size,
-          industry:     profile.industry.trim(),
-          designation:  profile.designation.trim(),
-          website:      profile.website.trim(),
-        }),
+      await recruiterApi.profile.update({
+        company_name: profile.company_name.trim(),
+        company_size: profile.company_size,
+        industry:     profile.industry.trim(),
+        designation:  profile.designation.trim(),
+        website:      profile.website.trim(),
       });
-      if (!res.ok) throw new Error((await res.json()).message);
       toast.success("Profile saved");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not save profile");
@@ -262,38 +241,12 @@ export default function RecruiterProfileSetup() {
     setUploading(true);
     setUploadPct(0);
 
-    const formData = new FormData();
-    formData.append("document",      file);
-    formData.append("document_type", docType);
-
     try {
-      // XHR gives upload progress; fetch does not
-      await new Promise<void>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", `${API_BASE}/api/recruiter/documents/upload`);
-        xhr.withCredentials = true;
-        xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-
-        xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable) setUploadPct(Math.round((e.loaded / e.total) * 100));
-        };
-
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            resolve();
-          } else {
-            const msg = (() => {
-              try { return (JSON.parse(xhr.responseText) as { message?: string }).message; }
-              catch { return undefined; }
-            })();
-            reject(new Error(msg ?? "Upload failed"));
-          }
-        };
-
-        xhr.onerror = () => reject(new Error("Network error — check your connection"));
-        xhr.send(formData);
-      });
-
+      // recruiterApi.documents.upload wraps api.uploadWithProgress — an
+      // XHR-based primitive (fetch still can't expose upload progress
+      // cleanly), added in P1.1 batch 4 specifically to centralize this
+      // without losing the progress bar below.
+      await recruiterApi.documents.upload(file, docType, setUploadPct);
       toast.success("Document uploaded successfully");
       await loadDocuments();
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -303,7 +256,7 @@ export default function RecruiterProfileSetup() {
       setUploading(false);
       setUploadPct(0);
     }
-  }, [docType, loadDocuments, token]);
+  }, [docType, loadDocuments]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -322,12 +275,7 @@ export default function RecruiterProfileSetup() {
   const deleteDocument = async (id: number) => {
     setDeletingId(id);
     try {
-      const res = await fetch(`${API_BASE}/api/recruiter/documents/${id}`, {
-        method:      "DELETE",
-        credentials: "include",
-        headers:     { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error((await res.json()).message);
+      await recruiterApi.documents.delete(id);
       setDocuments((prev) => prev.filter((d) => d.id !== id));
       toast.success("Document removed");
     } catch (err) {

@@ -48,8 +48,9 @@ export interface AuthContextType {
   isLoading: boolean;
   isRecruiter: boolean;
   isVerifiedRecruiter: boolean;
+  isAdmin: boolean;
   login: (token: string, extraUserData?: Partial<AuthUser>) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   updateUser: (updates: Partial<AuthUser>) => Promise<void>;
 }
@@ -116,6 +117,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const clearAuth = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_ID_KEY);
+    localStorage.removeItem("pathalytics_user");
+    sessionStorage.removeItem("careerPreferences");
     setToken(null);
     setUser(null);
   }, []);
@@ -206,8 +209,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     [fetchUserProfile]
   );
 
-  const logout = useCallback(() => {
-    clearAuth();
+  const logout = useCallback(async () => {
+    // Best-effort: also ask the server to clear the httpOnly cookie.
+    // Previously this only cleared client-side state — the cookie survived
+    // a "logout" until its natural expiry, and requireAuth (which checks
+    // the cookie before the Authorization header) kept authenticating the
+    // "logged out" session on any credentials:"include" request. A failed
+    // or offline request here is not a reason to leave the UI looking
+    // authenticated, so local state is cleared unconditionally below
+    // regardless of how this call goes.
+    try {
+      await fetch(`${API_URL}/api/auth/logout`, {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch {
+      // Network failure, backend down, etc. — local logout still proceeds.
+    } finally {
+      clearAuth();
+    }
   }, [clearAuth]);
 
   const refreshUser = useCallback(async () => {
@@ -320,36 +340,40 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   // stays in React state and is never persisted.
   useEffect(() => {
     if (user?.id) {
-      localStorage.setItem(USER_ID_KEY, JSON.stringify({ id: user.id, email: user.email }));
+      const serialized = JSON.stringify({ id: user.id, email: user.email });
+      localStorage.setItem(USER_ID_KEY, serialized);
+      localStorage.setItem("pathalytics_user", serialized);
     } else {
       localStorage.removeItem(USER_ID_KEY);
+      localStorage.removeItem("pathalytics_user");
     }
   }, [user?.id, user?.email]);
 
   const isRecruiter = user?.role === "recruiter";
   const isVerifiedRecruiter = isRecruiter && user?.verificationStatus === "approved";
+  const isAdmin = user?.role === "admin";
 
   const value = useMemo(
     () => ({
       user,
       token,
-      // !!token alone breaks OAuth sign-in: OAuthSuccess.tsx intentionally
-      // has no JWT to store client-side (the backend only sets an httpOnly
-      // cookie for that flow, by design — see routes/oauth.js), so relying
-      // on token truthiness left OAuth users looking "signed in" for one
-      // frame and then bounced straight back to /login by every guard.
-      // A populated user object (fetched via the cookie) is just as valid
-      // a signal that the session is real.
+      // OAuth sign-in produces a real JWT too — see the exchange-code flow
+      // in routes/oauth.js / OAuthSuccess.tsx, which calls login() with a
+      // normal token exactly like password auth does. The `|| !!user`
+      // fallback is kept as a harmless extra safety net (e.g. the brief
+      // window while a profile fetch is resolving) rather than something
+      // OAuth specifically depends on.
       isAuthenticated: !!token || !!user,
       isLoading,
       isRecruiter,
       isVerifiedRecruiter,
+      isAdmin,
       login,
       logout,
       refreshUser,
       updateUser,
     }),
-    [user, token, isLoading, isRecruiter, isVerifiedRecruiter, login, logout, refreshUser, updateUser]
+    [user, token, isLoading, isRecruiter, isVerifiedRecruiter, isAdmin, login, logout, refreshUser, updateUser]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

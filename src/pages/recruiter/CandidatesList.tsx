@@ -13,32 +13,11 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { useAuth } from "@/hooks/useAuth";
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
-
-interface Candidate {
-  id: number;
-  name: string;
-  location: string | null;
-  current_role: string | null;
-  current_company: string | null;
-  years_of_experience: string | null;
-  skills: string[];
-  linkedin_url: string | null;
-  github_url: string | null;
-  portfolio_url: string | null;
-  notice_period: string | null;
-  expected_salary: string | null;
-  // only present in match results
-  matchedSkills?: string[];
-  score?: number;
-}
-
-interface Job {
-  id: number;
-  title: string;
-}
+import {
+  recruiterApi,
+  type RecruiterCandidate as Candidate,
+  type RecruiterJobSummary as Job,
+} from "@/lib/api";
 
 const CandidateCard = ({
   candidate,
@@ -185,7 +164,6 @@ const CandidateCard = ({
 
 // ── Main page ────────────────────────────────────────────────
 const CandidatesList = () => {
-  const { token } = useAuth();
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
@@ -199,32 +177,24 @@ const CandidatesList = () => {
   const browse = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (search.trim()) params.set("search", search.trim());
-      if (skillFilter.trim()) params.set("skill", skillFilter.trim());
-
-      const res = await fetch(`${API_URL}/api/recruiter/candidates?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error();
-      setCandidates(await res.json());
+      setCandidates(
+        await recruiterApi.candidates.browse({
+          search: search.trim() || undefined,
+          skill: skillFilter.trim() || undefined,
+        })
+      );
     } catch {
       toast.error("Could not load candidates");
     } finally {
       setLoading(false);
     }
-  }, [token, search, skillFilter]);
+  }, [search, skillFilter]);
 
   const runMatch = async () => {
     if (!selectedJobId) return;
     setMatchLoading(true);
     try {
-      const res = await fetch(
-        `${API_URL}/api/recruiter/candidates/match/${selectedJobId}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (!res.ok) throw new Error((await res.json()).message);
-      const data = await res.json();
+      const data = await recruiterApi.candidates.match(selectedJobId);
       setCandidates(data.candidates);
       setMatchedJob(data.job);
       setMode("match");
@@ -239,18 +209,13 @@ const CandidatesList = () => {
   useEffect(() => {
     const loadJobs = async () => {
       try {
-        const res = await fetch(`${API_URL}/api/jobs/mine`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) {
-          const all: Array<{ id: number; title: string; status: string }> = await res.json();
-          setJobs(all.filter((j) => j.status === "published"));
-        }
+        const all = await recruiterApi.jobs.mine();
+        setJobs(all.filter((j) => j.status === "published"));
       } catch { /* non-fatal */ }
     };
     loadJobs();
     browse();
-  }, [token, browse]);
+  }, [browse]);
 
   const resetToBrowse = () => {
     setMode("browse");

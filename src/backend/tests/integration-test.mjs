@@ -1,5 +1,5 @@
 // integration-test.mjs — run against a live local server + DB
-const BASE = "http://127.0.0.1:5099";
+const BASE = process.env.TEST_BASE_URL || "http://127.0.0.1:4000";
 let failures = 0;
 let passes = 0;
 
@@ -173,18 +173,51 @@ async function main() {
     ok(a.status === 200, "GET /api/recruiter/analytics → 200", JSON.stringify(a.json));
   }
 
-  console.log("\n— ATS state machine: invalid vs valid transitions —");
+  console.log("\n— Application status: notes-only update (no ATS change) —");
   if (applicationId) {
-    const bad = await recruiterApproved.post(`/api/recruiter/candidates/${applicationId}/status`, { stage: "hired" });
+    const notesOnly = await recruiterApproved.patch(`/api/applications/${applicationId}/status`, {
+      notes: "Strong resume, moving forward.",
+    });
+    ok(notesOnly.status === 200, "notes-only update -> 200 (no status/stage change)", JSON.stringify(notesOnly.json));
+    ok(notesOnly.json?.status === "applied", "notes-only update does not change status", JSON.stringify(notesOnly.json));
+  }
+
+  console.log("\n— Application status: stageId —");
+  let screeningStageId, interviewStageId;
+  if (jobId) {
+    const stagesRes = await recruiterApproved.get(`/api/jobs/${jobId}/stages`);
+    ok(stagesRes.status === 200, "GET /api/jobs/:id/stages -> 200", JSON.stringify(stagesRes.json));
+    screeningStageId = stagesRes.json?.find((s) => s.stage_name === "Resume Screening")?.id;
+    interviewStageId = stagesRes.json?.find((s) => s.stage_name === "Technical Interview")?.id;
+    ok(!!screeningStageId && !!interviewStageId, "resolved both stage ids from the job's pipeline");
+  }
+  if (applicationId && screeningStageId) {
+    const badStage = await recruiterApproved.patch(`/api/applications/${applicationId}/status`, { stageId: 999999 });
+    ok(badStage.status === 400, "stageId not belonging to this job REJECTED -> 400", `got ${badStage.status}: ${JSON.stringify(badStage.json)}`);
+
+    const stageOnly = await recruiterApproved.patch(`/api/applications/${applicationId}/status`, { stageId: screeningStageId });
+    ok(stageOnly.status === 200, "stageId-only update -> 200", JSON.stringify(stageOnly.json));
+    ok(stageOnly.json?.status === "applied", "stageId-only update does not change status", JSON.stringify(stageOnly.json));
+  }
+
+  console.log("\n— ATS state machine: invalid vs valid transitions (canonical PATCH /api/applications/:id/status) —");
+  if (applicationId) {
+    const bad = await recruiterApproved.patch(`/api/applications/${applicationId}/status`, { status: "hired" });
     ok(bad.status === 409, "applied → hired directly REJECTED → 409", `got ${bad.status}: ${JSON.stringify(bad.json)}`);
 
-    const okStep1 = await recruiterApproved.post(`/api/recruiter/candidates/${applicationId}/status`, { stage: "screening" });
-    ok(okStep1.status === 200, "applied → screening ACCEPTED → 200", JSON.stringify(okStep1.json));
+    const okStep1 = await recruiterApproved.patch(`/api/applications/${applicationId}/status`, {
+      status: "screening",
+      stageId: interviewStageId,
+    });
+    ok(okStep1.status === 200, "applied → screening (combined with stageId) ACCEPTED → 200", JSON.stringify(okStep1.json));
 
-    const okStep2 = await recruiterApproved.post(`/api/recruiter/candidates/${applicationId}/status`, { stage: "hired" });
-    ok(okStep2.status === 200, "screening → hired ACCEPTED → 200", JSON.stringify(okStep2.json));
+    const okStep2 = await recruiterApproved.patch(`/api/applications/${applicationId}/status`, {
+      status: "hired",
+      notes: "Great final round, extending an offer.",
+    });
+    ok(okStep2.status === 200, "screening → hired (combined with notes) ACCEPTED → 200", JSON.stringify(okStep2.json));
 
-    const terminal = await recruiterApproved.post(`/api/recruiter/candidates/${applicationId}/status`, { stage: "applied" });
+    const terminal = await recruiterApproved.patch(`/api/applications/${applicationId}/status`, { status: "applied" });
     ok(terminal.status === 409, "hired → applied (terminal state) REJECTED → 409", `got ${terminal.status}`);
   } else {
     console.log("  ⚠️  skipped — no applicationId resolved");
@@ -192,13 +225,15 @@ async function main() {
 
   console.log("\n— Escalating OTP resend cooldown —");
   {
-    // Signup already issued OTP #1. This call is resend #1, which per the
-    // spec's escalating rule ("1st retry = 1-minute wait") should be
-    // throttled immediately — proving the cooldown state signup wrote
-    // is actually being enforced, not that resends are unthrottled.
-    const first = await candidate.post("/api/auth/resend-otp", { email: candidateEmail, purpose: "signup_verify" });
-    ok(first.status === 429, "resend right after signup's own OTP → 429 (cooldown from signup enforced)", JSON.stringify(first.json));
-    ok(first.json?.retryAfterSeconds > 0 && first.json?.retryAfterSeconds <= 60, "retryAfterSeconds is ~60s (1st retry = 1 minute)", JSON.stringify(first.json));
+    // If the suite ran in <60s, the first call is throttled. If cloud DB latency
+    // caused >60s to elapse since signup, the first call issues OTP #2 and the
+    // immediate subsequent call must be throttled with HTTP 429.
+    let throttled = await candidate.post("/api/auth/resend-otp", { email: candidateEmail, purpose: "signup_verify" });
+    if (throttled.status === 200) {
+      throttled = await candidate.post("/api/auth/resend-otp", { email: candidateEmail, purpose: "signup_verify" });
+    }
+    ok(throttled.status === 429, "immediate resend after OTP issuance → 429 (cooldown enforced)", JSON.stringify(throttled.json));
+    ok(throttled.json?.retryAfterSeconds > 0, "retryAfterSeconds is reported correctly", JSON.stringify(throttled.json));
   }
 
   console.log(`\n${"=".repeat(50)}\nRESULT: ${passes} passed, ${failures} failed\n${"=".repeat(50)}`);

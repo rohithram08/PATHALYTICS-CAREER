@@ -287,8 +287,10 @@ const candidateProfileSchema = z.object({
 });
 
 const parseJsonArray = (raw) => {
+  if (Array.isArray(raw)) return raw;
+  if (!raw) return [];
   try {
-    const val = JSON.parse(raw || "[]");
+    const val = typeof raw === "string" ? JSON.parse(raw) : raw;
     return Array.isArray(val) ? val : [];
   } catch {
     return [];

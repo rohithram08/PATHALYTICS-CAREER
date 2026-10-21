@@ -32,9 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { useAuth } from "@/hooks/useAuth";
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { recruiterApi, ApiError, type RecruiterJobStageInput } from "@/lib/api";
 
 const STAGE_TYPES = [
   { value: "screening",     label: "Resume Screening" },
@@ -101,7 +99,6 @@ function TabBar({
 const EditJob = () => {
   const { jobId } = useParams<{ jobId: string }>();
   const navigate = useNavigate();
-  const { token } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [savingDetails, setSavingDetails] = useState(false);
@@ -126,28 +123,13 @@ const EditJob = () => {
   useEffect(() => {
     const load = async () => {
       try {
-        const [jobRes, stagesRes] = await Promise.all([
-          fetch(`${API_URL}/api/jobs/${jobId}`, {
-            headers: { Authorization: `Bearer ${token}` },
-          }),
-          fetch(`${API_URL}/api/jobs/${jobId}/stages`, {
-            headers: { Authorization: `Bearer ${token}` },
-          }),
-        ]);
+        // Fire both in parallel, but keep their error handling independent:
+        // a stages failure is non-fatal (stages just stay empty), matching
+        // the original Promise.all behavior where only jobRes.ok gated the
+        // error path.
+        const stagesPromise = recruiterApi.jobs.stages.get(jobId!).catch(() => null);
+        const job = await recruiterApi.jobs.get(jobId!);
 
-        if (!jobRes.ok) {
-          if (jobRes.status === 404) {
-            toast.error("Job not found");
-          } else if (jobRes.status === 403) {
-            toast.error("You don't have access to this job");
-          } else {
-            toast.error("Could not load job");
-          }
-          navigate("/recruiter/jobs");
-          return;
-        }
-
-        const job = await jobRes.json();
         setJobStatus(job.status);
         setForm({
           title: job.title || "",
@@ -160,9 +142,8 @@ const EditJob = () => {
           externalApplyUrl: job.external_apply_url || "",
         });
 
-        if (stagesRes.ok) {
-          const raw: { id: number; stage_name: string; stage_type: string }[] =
-            await stagesRes.json();
+        const raw = await stagesPromise;
+        if (raw) {
           setStages(
             raw.map((s) => ({
               _key: String(s.id),
@@ -171,15 +152,22 @@ const EditJob = () => {
             }))
           );
         }
-      } catch {
-        toast.error("Could not load job");
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) {
+          toast.error("Job not found");
+        } else if (err instanceof ApiError && err.status === 403) {
+          toast.error("You don't have access to this job");
+        } else {
+          toast.error("Could not load job");
+        }
         navigate("/recruiter/jobs");
+        return;
       } finally {
         setLoading(false);
       }
     };
     load();
-  }, [jobId, token, navigate]);
+  }, [jobId, navigate]);
 
   // ── Details form helpers ─────────────────────────────────────────────
   const setField = (k: keyof JobForm, v: string) => {
@@ -203,19 +191,11 @@ const EditJob = () => {
     if (!validateDetails()) return;
     setSavingDetails(true);
     try {
-      const res = await fetch(`${API_URL}/api/jobs/${jobId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          ...form,
-          salaryMin: form.salaryMin ? Number(form.salaryMin) : null,
-          salaryMax: form.salaryMax ? Number(form.salaryMax) : null,
-        }),
+      await recruiterApi.jobs.update(jobId!, {
+        ...form,
+        salaryMin: form.salaryMin ? Number(form.salaryMin) : null,
+        salaryMax: form.salaryMax ? Number(form.salaryMax) : null,
       });
-      if (!res.ok) throw new Error((await res.json()).message);
       toast.success("Job details saved");
     } catch (err: unknown) {
       toast.error(
@@ -252,18 +232,9 @@ const EditJob = () => {
     }
     setSavingStages(true);
     try {
-      const res = await fetch(`${API_URL}/api/jobs/${jobId}/stages`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        // Strip internal _key — backend only wants stageName + stageType
-        body: JSON.stringify(
-          stages.map(({ stageName, stageType }) => ({ stageName, stageType }))
-        ),
-      });
-      if (!res.ok) throw new Error((await res.json()).message);
+      // Strip internal _key — backend only wants stageName + stageType
+      const payload: RecruiterJobStageInput[] = stages.map(({ stageName, stageType }) => ({ stageName, stageType }));
+      await recruiterApi.jobs.stages.update(jobId!, payload);
       toast.success("Pipeline stages updated");
     } catch (err: unknown) {
       toast.error(

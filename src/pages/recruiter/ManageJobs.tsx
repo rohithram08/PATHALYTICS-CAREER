@@ -8,20 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
-
-interface Job {
-  id: number;
-  title: string;
-  location: string;
-  job_type: string;
-  status: "draft" | "published" | "closed";
-  application_mode: "internal" | "external";
-  applicant_count: number;
-  created_at: string;
-  published_at: string | null;
-}
+import { recruiterApi, ApiError, type RecruiterJobSummary as Job } from "@/lib/api";
 
 const StatusBadge = ({ status }: { status: Job["status"] }) => {
   const map = {
@@ -39,40 +26,31 @@ const StatusBadge = ({ status }: { status: Job["status"] }) => {
 };
 
 const ManageJobs = () => {
-  const { token, isVerifiedRecruiter } = useAuth();
+  const { isVerifiedRecruiter } = useAuth();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [actioning, setActioning] = useState<number | null>(null);
 
   const loadJobs = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/jobs/mine`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error();
-      setJobs(await res.json());
+      setJobs(await recruiterApi.jobs.mine());
     } catch {
       toast.error("Could not load jobs");
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, []);
 
   useEffect(() => { loadJobs(); }, [loadJobs]);
 
   const publish = async (id: number) => {
     setActioning(id);
     try {
-      const res = await fetch(`${API_URL}/api/jobs/${id}/publish`, {
-        method: "PATCH",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message);
+      await recruiterApi.jobs.publish(id);
       toast.success("Job published");
       await loadJobs();
     } catch (err: unknown) {
-      toast.error((err instanceof Error ? err.message : "An error occurred") || "Could not publish");
+      toast.error((err instanceof ApiError || err instanceof Error ? err.message : "An error occurred") || "Could not publish");
     } finally {
       setActioning(null);
     }
@@ -81,11 +59,7 @@ const ManageJobs = () => {
   const close = async (id: number) => {
     setActioning(id);
     try {
-      const res = await fetch(`${API_URL}/api/jobs/${id}/close`, {
-        method: "PATCH",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error();
+      await recruiterApi.jobs.close(id);
       toast.success("Job closed");
       await loadJobs();
     } catch {

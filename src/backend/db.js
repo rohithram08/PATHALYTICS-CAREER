@@ -58,6 +58,7 @@ const db = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
+  timezone: "Z",
   ssl: process.env.DB_DISABLE_SSL === "true" ? undefined : { rejectUnauthorized: true },
 });
 
@@ -211,6 +212,8 @@ const initSchema = async () => {
       await addColumnIfMissing("users", "two_factor_enabled", "TINYINT(1) NOT NULL DEFAULT 0");
       await addColumnIfMissing("users", "failed_login_attempts", "INT DEFAULT 0");
       await addColumnIfMissing("users", "locked_until", "DATETIME NULL");
+      await addColumnIfMissing("users", "bio", "VARCHAR(500) NULL");
+      await addColumnIfMissing("users", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
 
       // ── FIX: Always ensure role column is the correct ENUM type ──
       // addColumnIfMissing won't fix an existing column that has the
@@ -309,6 +312,12 @@ const initSchema = async () => {
       );
       await addColumnIfMissing("recruiter_profiles", "verified_at", "DATETIME NULL");
       await addColumnIfMissing("recruiter_profiles", "verified_by", "INT NULL COMMENT 'admin user_id who approved'");
+      await addColumnIfMissing("recruiter_profiles", "company_website", "VARCHAR(500) NULL");
+      await addColumnIfMissing("recruiter_profiles", "company_logo_url", "LONGTEXT NULL");
+      await addColumnIfMissing("recruiter_profiles", "phone", "VARCHAR(30) NULL");
+      await addColumnIfMissing("recruiter_profiles", "linkedin_url", "VARCHAR(500) NULL");
+      await addColumnIfMissing("recruiter_profiles", "verification_notes", "TEXT NULL");
+      await addColumnIfMissing("recruiter_profiles", "doc_url", "LONGTEXT NULL");
 
       // Same class of bug users.role had (see the ALTER above): this
       // table's CREATE statement above is correct, but CREATE TABLE IF
@@ -369,6 +378,10 @@ const initSchema = async () => {
       await addColumnIfMissing("jobs", "published_at", "DATETIME NULL");
       await addColumnIfMissing("jobs", "closed_at", "DATETIME NULL");
       await addColumnIfMissing("jobs", "views", "INT NOT NULL DEFAULT 0");
+      await addColumnIfMissing("jobs", "experience_level", "ENUM('entry','mid','senior','lead','any') DEFAULT 'any'");
+      await addColumnIfMissing("jobs", "skills", "JSON NULL");
+      await addColumnIfMissing("jobs", "requirements", "LONGTEXT NULL");
+      await addColumnIfMissing("jobs", "salary_currency", "VARCHAR(10) DEFAULT 'INR'");
       await migrateEnumColumn("jobs", "status", ["draft", "published", "paused", "closed"], { active: "published" });
       await fixJobsRecruiterFk();
     }
@@ -396,6 +409,8 @@ const initSchema = async () => {
         ["screening", "aptitude_test", "interview", "assignment", "offer", "custom"],
         { aptitude: "aptitude_test" }
       );
+      await addColumnIfMissing("pipeline_stages", "description", "TEXT NULL");
+      await addColumnIfMissing("pipeline_stages", "duration_minutes", "INT NULL");
     }
 
     // ── applications ─────────────────────────────────────────────
@@ -647,5 +662,6 @@ const initSchema = async () => {
   }
 };
 
-initSchema();
+export const schemaPromise = initSchema();
+export { initSchema };
 export default db;

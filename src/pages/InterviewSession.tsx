@@ -14,10 +14,40 @@ import { generateQuestion, evaluateAnswer } from '@/lib/interviewAI';
 import { getScoreMeta } from '@/lib/scoreUtils';
 import type { Difficulty, AvatarState, AnswerRecord } from '@/types/interview';
 
+interface ISpeechRecognitionResultItem {
+  transcript: string;
+}
+
+interface ISpeechRecognitionResult {
+  isFinal: boolean;
+  0: ISpeechRecognitionResultItem;
+  length: number;
+}
+
+interface ISpeechRecognitionEvent {
+  resultIndex: number;
+  results: {
+    length: number;
+    [index: number]: ISpeechRecognitionResult;
+  };
+}
+
+interface ISpeechRecognitionInstance {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: ISpeechRecognitionEvent) => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+}
+
 declare global {
   interface Window {
-    SpeechRecognition: any;
-    webkitSpeechRecognition: any;
+    SpeechRecognition?: new () => ISpeechRecognitionInstance;
+    webkitSpeechRecognition?: new () => ISpeechRecognitionInstance;
   }
 }
 
@@ -60,7 +90,7 @@ export default function InterviewSession() {
   const [exitPrompt, setExitPrompt] = useState(false);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const recogRef = useRef<any>(null);
+  const recogRef = useRef<ISpeechRecognitionInstance | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const totalQ = cfg?.questionCount ?? 5;
@@ -244,7 +274,7 @@ export default function InterviewSession() {
     r.continuous = true;
     r.interimResults = true;
     r.lang = 'en-US';
-    r.onresult = (e: any) => {
+    r.onresult = (e: ISpeechRecognitionEvent) => {
       let final = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
         if (e.results[i].isFinal) final += e.results[i][0].transcript + ' ';

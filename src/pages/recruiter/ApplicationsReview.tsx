@@ -9,22 +9,16 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { useAuth } from "@/hooks/useAuth";
+import {
+  recruiterApi,
+  type RecruiterApplicant as Applicant,
+  type RecruiterJobStage as Stage,
+} from "@/lib/api";
 
+// Still needed for the direct resume-download <a href> below — that's a
+// browser navigation (relies on the httpOnly cookie), not a fetch() call,
+// so it's outside recruiterApi's scope.
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
-
-interface Stage { id: number; stage_name: string; stage_type: string; }
-interface Applicant {
-  id: number;
-  candidate_name: string;
-  candidate_email: string;
-  status: string;
-  current_stage_id: number | null;
-  current_stage_name: string | null;
-  applied_at: string;
-  resume_storage_key: string | null;
-  cover_note: string | null;
-}
 
 const STATUS_OPTIONS = ["applied","in-review","interview","offer","rejected"];
 
@@ -39,7 +33,6 @@ const statusColor: Record<string, string> = {
 
 const ApplicationsReview = () => {
   const { jobId } = useParams<{ jobId: string }>();
-  const { token } = useAuth();
   const [applicants, setApplicants] = useState<Applicant[]>([]);
   const [stages, setStages] = useState<Stage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,17 +42,12 @@ const ApplicationsReview = () => {
   useEffect(() => {
     const load = async () => {
       try {
-        const [aRes, sRes] = await Promise.all([
-          fetch(`${API_URL}/api/applications/job/${jobId}`, {
-            headers: { Authorization: `Bearer ${token}` },
-          }),
-          fetch(`${API_URL}/api/jobs/${jobId}/stages`, {
-            headers: { Authorization: `Bearer ${token}` },
-          }),
+        const [applicantsData, stagesData] = await Promise.all([
+          recruiterApi.applications.byJob(jobId!),
+          recruiterApi.jobs.stages.get(jobId!),
         ]);
-        if (!aRes.ok || !sRes.ok) throw new Error();
-        setApplicants(await aRes.json());
-        setStages(await sRes.json());
+        setApplicants(applicantsData);
+        setStages(stagesData);
       } catch {
         toast.error("Could not load applicants");
       } finally {
@@ -67,18 +55,12 @@ const ApplicationsReview = () => {
       }
     };
     load();
-  }, [jobId, token]);
+  }, [jobId]);
 
   const update = async (appId: number, payload: { status?: string; stageId?: number }) => {
     setUpdating(appId);
     try {
-      const res = await fetch(`${API_URL}/api/applications/${appId}/status`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message);
+      const data = await recruiterApi.applications.updateStatus(appId, payload);
 
       setApplicants((prev) =>
         prev.map((a) =>

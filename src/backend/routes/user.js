@@ -6,7 +6,7 @@ import { z } from "zod";
 import db from "../db.js";
 import { requireAuth } from "../middleware/auth.js";
 import { upload, validateUploadedFile, cleanupUpload } from "../middleware/upload.js";
-import { uploadLimiter } from "../middleware/security.js";
+import { uploadLimiter, requireWhitelistedOrigin } from "../middleware/security.js";
 import { authLimiter } from "../middleware/security.js";
 
 const router = express.Router();
@@ -93,6 +93,7 @@ router.put("/profile", async (req, res) => {
 // ── POST /api/user/avatar ─────────────────────────────────────
 router.post(
   "/avatar",
+  requireWhitelistedOrigin,
   uploadLimiter,
   upload.single("avatar"),
   validateUploadedFile,

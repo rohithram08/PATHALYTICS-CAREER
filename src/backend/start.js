@@ -9,3 +9,9 @@ server.on("error", (err) => {
   console.error("❌ Failed to bind port:", err);
   process.exit(1);
 });
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("Unhandled Rejection at:", promise, "reason:", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught Exception thrown:", err);
+});

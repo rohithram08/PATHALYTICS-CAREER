@@ -11,11 +11,38 @@ import {
 } from "lucide-react";
 import { userKey } from "@/lib/userStorage";
 import { toast } from "sonner";
+import { API_URL } from "@/lib/api";
 
-const API_BASE = import.meta.env.VITE_CHATBOT_URL || "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_CHATBOT_URL || API_URL;
 const MAX_MESSAGE_LENGTH = 2000;
 const HISTORY_KEY = "pathalytics_chat_history";
 const MAX_STORED_MESSAGES = 50;
+
+interface SpeechRecognitionResultItem {
+  transcript: string;
+}
+
+interface SpeechRecognitionResultList {
+  length: number;
+  [index: number]: {
+    [index: number]: SpeechRecognitionResultItem;
+  };
+}
+
+interface SpeechRecognitionEventLike {
+  results: SpeechRecognitionResultList;
+}
+
+interface SpeechRecognitionInstance {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
 
 interface Message {
   id: string;
@@ -23,7 +50,7 @@ interface Message {
   who: "user" | "bot";
   intent?: string;
   targetUrl?: string | null;
-  structuredData?: any;
+  structuredData?: unknown;
   timestamp: number;
 }
 
@@ -32,9 +59,11 @@ interface ChatResponse {
   intent?: string;
   target_url?: string | null;
   has_roadmap_json?: boolean;
-  roadmap_data?: any;
-  structured_data?: any;
-  website_evaluation?: any;
+  roadmap_data?: unknown;
+  structured_data?: unknown;
+  website_evaluation?: unknown;
+  detail?: string;
+  message?: string;
 }
 
 function cleanTextForDisplay(text: unknown): string {
@@ -53,7 +82,7 @@ function formatBotText(text: unknown): string {
   return cleaned.split(/(?<=[.!?])\s+/).join("\n");
 }
 
-function extractJsonBlock(text: string): any | null {
+function extractJsonBlock(text: string): Record<string, unknown> | unknown[] | null {
   const match = text.match(/```json\s*([\s\S]*?)\s*```/);
   if (!match) return null;
 
@@ -80,7 +109,7 @@ const ChatAssistant = () => {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const recognitionRef = useRef<any>(null);
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -126,9 +155,13 @@ const ChatAssistant = () => {
   }, [messages, isLoading]);
 
   useEffect(() => {
+    const windowWithSpeech = window as unknown as {
+      SpeechRecognition?: new () => SpeechRecognitionInstance;
+      webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
+    };
     const SpeechRecognitionAPI =
-      (window as any).SpeechRecognition ||
-      (window as any).webkitSpeechRecognition;
+      windowWithSpeech.SpeechRecognition ||
+      windowWithSpeech.webkitSpeechRecognition;
 
     if (!SpeechRecognitionAPI) return;
 
@@ -137,7 +170,7 @@ const ChatAssistant = () => {
     recognition.interimResults = true;
     recognition.continuous = true;
 
-    recognition.onresult = (event: any) => {
+    recognition.onresult = (event: SpeechRecognitionEventLike) => {
       let transcript = "";
       for (let i = 0; i < event.results.length; i++) {
         transcript += event.results[i][0].transcript + " ";
@@ -153,7 +186,9 @@ const ChatAssistant = () => {
     return () => {
       try {
         recognition.stop();
-      } catch {}
+      } catch {
+        // Ignore audio shutdown errors
+      }
     };
   }, []);
 
@@ -187,7 +222,9 @@ const ChatAssistant = () => {
     setMessages([]);
     try {
       localStorage.removeItem(userKey(HISTORY_KEY));
-    } catch {}
+    } catch {
+      // Ignore storage errors
+    }
     toast.success("Chat cleared");
   };
 
@@ -229,8 +266,8 @@ const ChatAssistant = () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(localStorage.getItem("token")
-            ? { Authorization: `Bearer ${localStorage.getItem("token")}` }
+          ...(localStorage.getItem("pathalytics_token") || localStorage.getItem("token")
+            ? { Authorization: `Bearer ${localStorage.getItem("pathalytics_token") || localStorage.getItem("token")}` }
             : {}),
         },
         body: JSON.stringify({
@@ -260,8 +297,8 @@ const ChatAssistant = () => {
       const replyText = res.ok
         ? formatBotText(rawReply || "I’m not sure I understood that.")
         : `⚠️ ${
-            (data as any)?.detail ||
-            (data as any)?.message ||
+            data?.detail ||
+            data?.message ||
             `Server returned ${res.status}`
           }`;
 
@@ -276,8 +313,8 @@ const ChatAssistant = () => {
       };
 
       setMessages((prev) => [...prev, botMsg]);
-    } catch (err: any) {
-      if (err?.name === "AbortError") return;
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === "AbortError") return;
 
       const isOffline =
         err instanceof TypeError && /failed to fetch/i.test(err.message);
@@ -285,7 +322,7 @@ const ChatAssistant = () => {
       const errorMsg: Message = {
         id: makeId(),
         text: isOffline
-          ? "I can't reach the chatbot service. Please make sure the backend is running on port 8000."
+          ? "I am currently unable to reach the AI career service. Please try again in a few moments."
           : "Sorry, something went wrong. Please try again.",
         who: "bot",
         timestamp: Date.now(),

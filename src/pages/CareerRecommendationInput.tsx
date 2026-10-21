@@ -15,6 +15,7 @@ import { useToast } from '@/hooks/use-toast';
 import {
   skills, interests, personalities, workStyles, type UserPreferences,
 } from '@/data/careerRecommendations';
+import { userKey } from '@/lib/userStorage';
 
 const STORAGE_KEY = 'careerRecommendation_draft';
 
@@ -44,7 +45,8 @@ const CareerRecommendationInput = () => {
 
   // Load draft
   useEffect(() => {
-    const draft = localStorage.getItem(STORAGE_KEY);
+    const key = userKey(STORAGE_KEY);
+    const draft = localStorage.getItem(key) || localStorage.getItem(STORAGE_KEY);
     if (draft) {
       try {
         const parsed = JSON.parse(draft);
@@ -76,14 +78,16 @@ const CareerRecommendationInput = () => {
       selectedSkills.length + selectedInterests.length +
       selectedPersonality.length + selectedWorkStyle.length;
 
+    const key = userKey(STORAGE_KEY);
     if (total > 0) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      localStorage.setItem(key, JSON.stringify({
         skills: selectedSkills,
         interests: selectedInterests,
         personality: selectedPersonality,
         workStyle: selectedWorkStyle,
       }));
     } else {
+      localStorage.removeItem(key);
       localStorage.removeItem(STORAGE_KEY);
     }
   }, [selectedSkills, selectedInterests, selectedPersonality, selectedWorkStyle]);
@@ -200,21 +204,14 @@ const CareerRecommendationInput = () => {
       workStyle: selectedWorkStyle,
     };
 
-    // ✅ Save FIRST
+    // Save to both persistent localStorage and session storage
+    const scopedKey = userKey('pathalytics_career_preferences');
+    localStorage.setItem(scopedKey, JSON.stringify(preferences));
+    localStorage.setItem('pathalytics_career_preferences', JSON.stringify(preferences));
     sessionStorage.setItem('careerPreferences', JSON.stringify(preferences));
 
-    // ✅ Verify it actually saved
-    const saved = sessionStorage.getItem('careerPreferences');
-    if (!saved) {
-      toast({
-        title: 'Something went wrong',
-        description: 'Could not save preferences. Please try again.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
     // ✅ Clear draft AFTER saving
+    localStorage.removeItem(userKey(STORAGE_KEY));
     localStorage.removeItem(STORAGE_KEY);
 
     // ✅ Navigate last
@@ -227,6 +224,7 @@ const CareerRecommendationInput = () => {
     setSelectedPersonality([]);
     setSelectedWorkStyle([]);
     setSearchQuery('');
+    localStorage.removeItem(userKey(STORAGE_KEY));
     localStorage.removeItem(STORAGE_KEY);
     setHasLoadedDraft(false);
     toast({ title: 'Cleared', description: 'All selections removed.' });

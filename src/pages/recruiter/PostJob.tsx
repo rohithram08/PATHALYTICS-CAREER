@@ -11,9 +11,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { useAuth } from "@/hooks/useAuth";
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { recruiterApi, type RecruiterJobInput, type RecruiterJobStageInput } from "@/lib/api";
 
 const STAGE_TYPES = [
   { value: "screening",     label: "Resume Screening" },
@@ -46,7 +44,6 @@ function makeKey() {
 
 const PostJob = () => {
   const navigate = useNavigate();
-  const { token } = useAuth();
   const [step, setStep] = useState<1 | 2>(1);
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -79,17 +76,12 @@ const PostJob = () => {
     if (!validateStep1()) return;
     setSaving(true);
     try {
-      const res = await fetch(`${API_URL}/api/jobs`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          ...job,
-          salaryMin: job.salaryMin ? Number(job.salaryMin) : undefined,
-          salaryMax: job.salaryMax ? Number(job.salaryMax) : undefined,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message);
+      const body: RecruiterJobInput = {
+        ...job,
+        salaryMin: job.salaryMin ? Number(job.salaryMin) : undefined,
+        salaryMax: job.salaryMax ? Number(job.salaryMax) : undefined,
+      };
+      const data = await recruiterApi.jobs.create(body);
       setJobId(data.id);
       setStep(2);
     } catch (err: unknown) {
@@ -119,18 +111,8 @@ const PostJob = () => {
     }
     setPublishing(true);
     try {
-      const stageRes = await fetch(`${API_URL}/api/jobs/${jobId}/stages`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(stagesPayload()),
-      });
-      if (!stageRes.ok) throw new Error((await stageRes.json()).message);
-
-      const pubRes = await fetch(`${API_URL}/api/jobs/${jobId}/publish`, {
-        method: "PATCH",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!pubRes.ok) throw new Error((await pubRes.json()).message);
+      await recruiterApi.jobs.stages.update(jobId!, stagesPayload());
+      await recruiterApi.jobs.publish(jobId!);
 
       toast.success("Job published! Candidates can now apply.");
       navigate("/recruiter/jobs");
@@ -145,15 +127,16 @@ const PostJob = () => {
     if (!jobId) return;
     setSaving(true);
     try {
-      await fetch(`${API_URL}/api/jobs/${jobId}/stages`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(stagesPayload()),
-      });
+      // Fixed in P1.1 stabilization: this used to swallow any HTTP-error
+      // response and show "Saved as draft" regardless (only a network-
+      // level failure ever reached the catch below). Now every failure —
+      // HTTP error or network — surfaces as an error, matching publish()
+      // above.
+      await recruiterApi.jobs.stages.update(jobId, stagesPayload());
       toast.success("Saved as draft");
       navigate("/recruiter/jobs");
-    } catch {
-      toast.error("Failed to save draft");
+    } catch (err: unknown) {
+      toast.error((err instanceof Error ? err.message : "An error occurred") || "Failed to save draft");
     } finally {
       setSaving(false);
     }

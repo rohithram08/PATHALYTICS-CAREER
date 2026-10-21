@@ -12,31 +12,10 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
-
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { recruiterApi, ApiError, type RecruiterDashboardData } from "@/lib/api";
 
 // ── Types ─────────────────────────────────────────────────────
-interface DashboardData {
-  jobs: { total_jobs: number; active_jobs: number; closed_jobs: number };
-  applications: {
-    total_applications: number;
-    screening: number;
-    interviews: number;
-    offers: number;
-    hired: number;
-    rejected: number;
-  };
-  views: { total_views: number };
-  trend: Array<{ day: string; count: number }>;
-  recent_applications: Array<{
-    id: number;
-    stage: string;
-    created_at: string;
-    candidate_name: string;
-    candidate_email: string;
-    job_title: string;
-  }>;
-}
+type DashboardData = RecruiterDashboardData;
 
 const STAGE_COLORS: Record<string, string> = {
   applied:   "bg-blue-50 text-blue-700 border-blue-200",
@@ -150,7 +129,7 @@ function PipelineFunnel({ apps }: { apps: DashboardData["applications"] }) {
 
 // ── Main Dashboard ────────────────────────────────────────────
 export default function RecruiterDashboard() {
-  const { user, token } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -159,20 +138,15 @@ export default function RecruiterDashboard() {
   const fetchDashboard = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/recruiter/dashboard`, {
-        credentials: "include",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.status === 401) { navigate("/login"); return; }
-      if (!res.ok) throw new Error("Failed to load dashboard");
-      const json = await res.json();
+      const json = await recruiterApi.dashboard.get();
       setData(json);
     } catch (err) {
+      if (err instanceof ApiError && err.status === 401) { navigate("/login"); return; }
       toast.error(err instanceof Error ? err.message : "Could not load dashboard");
     } finally {
       setLoading(false);
     }
-  }, [navigate, token]);
+  }, [navigate]);
 
   useEffect(() => { fetchDashboard(); }, [fetchDashboard]);
 

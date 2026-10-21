@@ -17,6 +17,7 @@ import {
   Bot,
   Map,
   Info,
+  FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -77,6 +78,7 @@ const Header = () => {
     { label: "Careers", href: "/career-recommendation", icon: Sparkles },
     { label: "Roadmaps", href: "/roadmaps", icon: Map },
     { label: "AI Chat", href: "/chatbot", icon: Bot },
+    { label: "Resume", href: "/resume-builder", icon: FileText },
     { label: "Jobs", href: "/jobs", icon: Briefcase },
     { label: "Saved", href: "/saved-careers", icon: BookmarkCheck },
   ];
@@ -186,6 +188,9 @@ const Header = () => {
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => navigate("/saved-careers")} className="flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer">
                     <BookmarkCheck className="w-4 h-4 text-muted-foreground" /> Saved Careers
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate("/resume-builder")} className="flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer">
+                    <FileText className="w-4 h-4 text-muted-foreground" /> Resume Builder
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => navigate("/settings")} className="flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer">
                     <Settings className="w-4 h-4 text-muted-foreground" /> Settings

@@ -11,16 +11,10 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { useAuth } from "@/hooks/useAuth";
+import { recruiterApi, ApiError, type RecruiterAnalyticsData } from "@/lib/api";
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
-
-interface AnalyticsData {
-  funnel: Array<{ stage: string; count: number }>;
-  dailyApps: Array<{ date: string; count: number }>;
-  topJobs: Array<{ id: number; title: string; applications: number; views: number }>;
-  timeToHire: { avg_days: number | null };
-}
+// ── Types ─────────────────────────────────────────────────────
+type AnalyticsData = RecruiterAnalyticsData;
 
 const STAGE_COLORS: Record<string, string> = {
   applied:   "#3b82f6",
@@ -175,7 +169,6 @@ function TopJobsTable({ jobs }: { jobs: AnalyticsData["topJobs"] }) {
 
 export default function RecruiterAnalytics() {
   const navigate = useNavigate();
-  const { token } = useAuth();
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [days, setDays] = useState("30");
@@ -183,19 +176,14 @@ export default function RecruiterAnalytics() {
   const fetchAnalytics = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/recruiter/analytics?days=${days}`, {
-        credentials: "include",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.status === 401) { navigate("/login"); return; }
-      if (!res.ok) throw new Error("Failed to load analytics");
-      setData(await res.json());
+      setData(await recruiterApi.analytics.get(days));
     } catch (err) {
+      if (err instanceof ApiError && err.status === 401) { navigate("/login"); return; }
       toast.error(err instanceof Error ? err.message : "Could not load analytics");
     } finally {
       setLoading(false);
     }
-  }, [days, navigate, token]);
+  }, [days, navigate]);
 
   useEffect(() => { fetchAnalytics(); }, [fetchAnalytics]);
 

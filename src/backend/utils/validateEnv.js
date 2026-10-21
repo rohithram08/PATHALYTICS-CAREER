@@ -82,6 +82,14 @@ export function validateEnv() {
     );
   }
 
+  // ── Production Turnstile check ────────────────────────────
+  if (process.env.NODE_ENV === "production" && (!process.env.TURNSTILE_SECRET_KEY || !process.env.TURNSTILE_SECRET_KEY.trim())) {
+    console.warn(
+      "⚠️  PRODUCTION WARNING: TURNSTILE_SECRET_KEY is not configured.\n" +
+      "   Auth endpoints will fail closed with 503 until TURNSTILE_SECRET_KEY is configured in production."
+    );
+  }
+
   console.log("✅ Environment variables validated");
 }
 

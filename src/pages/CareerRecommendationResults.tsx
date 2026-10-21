@@ -12,6 +12,10 @@ import {
   Heart,
   User,
   ArrowRight,
+  Target,
+  AlertCircle,
+  FolderGit2,
+  Mic,
 } from 'lucide-react';
 import Layout from '@/components/Layout';
 import { Button } from '@/components/ui/button';
@@ -23,6 +27,7 @@ import {
   type RecommendationResult,
 } from '@/data/careerRecommendations';
 import { trackActivity } from '@/lib/activityTracker';
+import { userKey } from '@/lib/userStorage';
 
 const CareerRecommendationResults = () => {
   const navigate = useNavigate();
@@ -32,10 +37,14 @@ const CareerRecommendationResults = () => {
 
   useEffect(() => {
     try {
-      const storedPreferences = sessionStorage.getItem('careerPreferences');
+      let storedPreferences = sessionStorage.getItem('careerPreferences');
+      if (!storedPreferences) {
+        const scopedKey = userKey('pathalytics_career_preferences');
+        storedPreferences = localStorage.getItem(scopedKey) || localStorage.getItem('pathalytics_career_preferences');
+      }
 
       if (!storedPreferences) {
-        setLoadError('Your recommendation session has expired.');
+        setLoadError('Your recommendation session has expired or no assessment was found.');
         return;
       }
 
@@ -259,11 +268,24 @@ const CareerRecommendationResults = () => {
                   style={{ animationDelay: `${index * 100}ms` }}
                 >
                   <CardHeader className="pb-3">
-                    <div className="flex justify-between items-start mb-3 gap-2">
-                      <Badge className={matchStrength.color}>{matchStrength.label}</Badge>
-                      <Badge variant="outline" className={getDemandColor(career.demand)}>
-                        {career.demand} Demand
-                      </Badge>
+                    <div className="flex justify-between items-start mb-2 gap-2">
+                      <div className="flex flex-wrap gap-1.5 items-center">
+                        <Badge className={matchStrength.color}>{matchStrength.label}</Badge>
+                        <Badge variant="outline" className={getDemandColor(career.demand)}>
+                          {career.demand} Demand
+                        </Badge>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <span className="text-xl font-black text-primary">{career.readinessPercentage}%</span>
+                        <span className="text-[10px] text-muted-foreground block -mt-1 font-semibold uppercase tracking-wider">Readiness</span>
+                      </div>
+                    </div>
+
+                    <div className="w-full bg-muted/60 rounded-full h-1.5 mb-2 overflow-hidden">
+                      <div
+                        className="bg-primary h-full rounded-full transition-all duration-500"
+                        style={{ width: `${career.readinessPercentage}%` }}
+                      />
                     </div>
 
                     <CardTitle className="text-lg leading-snug">{career.title}</CardTitle>
@@ -271,6 +293,11 @@ const CareerRecommendationResults = () => {
                     <p className="text-muted-foreground text-sm line-clamp-2 min-h-[2.5rem]">
                       {career.description}
                     </p>
+
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground pt-1">
+                      <Target className="w-3.5 h-3.5 text-primary shrink-0" />
+                      <span><strong className="text-foreground">Target Prep:</strong> {career.targetPreparationTimeline}</span>
+                    </div>
                   </CardHeader>
 
                   <CardContent className="flex flex-col gap-3 pt-0 px-5 pb-5 flex-1">
@@ -303,7 +330,34 @@ const CareerRecommendationResults = () => {
                       ))}
                     </div>
 
-                    <div className="bg-muted/50 rounded-xl p-4 h-[7.5rem] overflow-y-auto">
+                    {career.missingSkills && career.missingSkills.length > 0 && (
+                      <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-xs space-y-1.5">
+                        <div className="flex items-center gap-1.5 text-amber-500 font-semibold">
+                          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                          <span>Skill Gap to Bridge for this Role:</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {career.missingSkills.map((s) => (
+                            <Badge key={s} variant="outline" className="text-[11px] border-amber-500/30 text-amber-500 bg-background/50">
+                              + {s}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {career.recommendedProjects && career.recommendedProjects.length > 0 && (
+                      <div className="p-3 rounded-xl bg-muted/40 border border-border text-xs space-y-1">
+                        <div className="flex items-center gap-1.5 text-foreground font-semibold">
+                          <FolderGit2 className="w-3.5 h-3.5 text-primary shrink-0" />
+                          <span>Proof-of-Skill Portfolio Project:</span>
+                        </div>
+                        <p className="font-semibold text-primary text-[11px]">{career.recommendedProjects[0].title}</p>
+                        <p className="text-muted-foreground text-[10px] line-clamp-1">{career.recommendedProjects[0].description}</p>
+                      </div>
+                    )}
+
+                    <div className="bg-muted/50 rounded-xl p-4 h-[6.5rem] overflow-y-auto">
                       <h4 className="text-sm font-semibold text-foreground mb-2 flex items-center gap-2">
                         <Sparkles className="w-4 h-4 text-primary shrink-0" />
                         Why This Career?
@@ -355,11 +409,18 @@ const CareerRecommendationResults = () => {
                         </p>
                       </div>
 
-                      <Button className="w-full" asChild>
-                        <Link to={roadmapPath}>
-                          View Career Roadmap <ArrowRight className="w-4 h-4 ml-1" />
-                        </Link>
-                      </Button>
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        <Button className="w-full" asChild>
+                          <Link to={roadmapPath}>
+                            Roadmap <ArrowRight className="w-3.5 h-3.5 ml-1" />
+                          </Link>
+                        </Button>
+                        <Button variant="outline" className="w-full border-primary/30 hover:bg-primary/5 text-primary" asChild>
+                          <Link to={`/interview/${career.id}/session`}>
+                            <Mic className="w-3.5 h-3.5 mr-1 text-primary" /> Mock Interview
+                          </Link>
+                        </Button>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -387,6 +448,19 @@ const CareerRecommendationResults = () => {
             </CardContent>
           </Card>
         )}
+
+        {/* ── Scoring Methodology Disclosure ── */}
+        <div className="mt-10 p-5 rounded-2xl bg-muted/30 border border-border/60 text-xs text-muted-foreground leading-relaxed flex items-start gap-3.5">
+          <Target className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <p className="font-semibold text-foreground">
+              About Pathalytics Readiness Scores & Skill Recommendations
+            </p>
+            <p>
+              Readiness scores are directional curriculum-planning metrics calculated by comparing your selected skills (50%), interests (25%), personality traits (15%), and work style (10%) against verified industry role standards. Scores are bounded between 20% and 98% to encourage deliberate practice and practical project execution. They measure structured portfolio readiness, not a guaranteed employment outcome.
+            </p>
+          </div>
+        </div>
       </div>
     </Layout>
   );

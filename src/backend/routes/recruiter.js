@@ -46,8 +46,7 @@ import { z } from "zod";
 import db from "../db.js";
 import { requireAuth, requireRecruiter, requireVerifiedRecruiter, checkRecruiterVerified } from "../middleware/auth.js";
 import { upload, validateUploadedFile, cleanupUpload } from "../middleware/upload.js";
-import { uploadLimiter } from "../middleware/security.js";
-import { checkStatusTransition, RECRUITER_SETTABLE_STATUSES } from "../utils/atsTransitions.js";
+import { uploadLimiter, requireWhitelistedOrigin } from "../middleware/security.js";
 import { sendNotification } from "../utils/emailService.js";
 
 const router = express.Router();
@@ -67,11 +66,6 @@ const jobFormSchema = z.object({
   skills: z.array(z.string().max(60)).max(20).optional(),
   deadline: z.string().datetime().optional(),
   is_active: z.boolean().default(true),
-});
-
-const candidateStatusSchema = z.object({
-  stage: z.enum(RECRUITER_SETTABLE_STATUSES),
-  notes: z.string().max(2000).optional(),
 });
 
 const messageSchema = z.object({
@@ -531,67 +525,15 @@ router.get("/candidates/:id", requireVerifiedRecruiter, async (req, res) => {
   }
 });
 
-// ── POST /candidates/:id/status ─────────────────────────────────
-router.post("/candidates/:id/status", requireVerifiedRecruiter, async (req, res) => {
-  try {
-    const parsed = candidateStatusSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten().fieldErrors });
-    }
-
-    const [check] = await db.query(
-      `SELECT a.id, a.status, a.user_id, a.job_id, j.title AS job_title,
-              candidate.name AS candidate_name, candidate.email AS candidate_email
-       FROM applications a
-       JOIN jobs j ON a.job_id = j.id
-       JOIN users candidate ON candidate.id = a.user_id
-       WHERE a.id = ? AND j.recruiter_id = ?`,
-      [req.params.id, req.user.id]
-    );
-    if (!check.length) return res.status(404).json({ message: "Application not found" });
-    const application = check[0];
-
-    const transition = checkStatusTransition(application.status, parsed.data.stage);
-    if (!transition.ok) {
-      return res.status(409).json({ message: transition.reason });
-    }
-
-    const conn = await db.getConnection();
-    try {
-      await conn.beginTransaction();
-      await conn.query(
-        "UPDATE applications SET status = ?, cover_note = COALESCE(?, cover_note) WHERE id = ?",
-        [parsed.data.stage, parsed.data.notes ?? null, req.params.id]
-      );
-      await conn.query(
-        `INSERT INTO application_status_history (application_id, from_status, to_status, changed_by)
-         VALUES (?, ?, ?, ?)`,
-        [req.params.id, application.status, parsed.data.stage, req.user.id]
-      );
-      await conn.commit();
-    } catch (err) {
-      await conn.rollback();
-      throw err;
-    } finally {
-      conn.release();
-    }
-
-    sendNotification("application_status_changed", {
-      to: application.candidate_email,
-      userId: application.user_id,
-      role: "user",
-      applicationId: application.id,
-      jobId: application.job_id,
-      jobTitle: application.job_title,
-      status: parsed.data.stage,
-    });
-
-    return res.json({ message: "Status updated", stage: parsed.data.stage });
-  } catch (err) {
-    console.error("[recruiter/candidates status]", err);
-    return res.status(500).json({ message: "Server error" });
-  }
-});
+// POST /candidates/:id/status removed in P1.2 (application-status API
+// consolidation). This was one of two competing endpoints that could
+// update an application's ATS status — the other, PATCH
+// /api/applications/:id/status, is now canonical and additionally
+// supports the custom-pipeline-stage (stageId) update this one never
+// had. Its unique notes → cover_note capability was preserved by
+// extending the canonical endpoint's payload to accept an optional
+// `notes` field rather than being dropped. See
+// PATHALYTICS_ENGINEERING_STATE.md for the full audit/migration record.
 
 // ── GET /analytics ────────────────────────────────────────────
 router.get("/analytics", requireVerifiedRecruiter, async (req, res) => {
@@ -766,6 +708,7 @@ router.get("/documents", async (req, res) => {
 // ── POST /documents/upload — NEW ────────────────────────────────
 router.post(
   "/documents/upload",
+  requireWhitelistedOrigin,
   uploadLimiter,
   upload.single("document"),
   validateUploadedFile,

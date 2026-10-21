@@ -31,6 +31,7 @@ validateEnv();
 
 import authRoutes            from "./routes/auth.js";
 import meRoutes              from "./routes/me.js";
+import userRoutes            from "./routes/user.js";
 import passwordRoutes        from "./routes/password.js";
 import oauthRoutes           from "./routes/oauth.js";
 import jobsRoutes            from "./routes/jobs.js";
@@ -96,6 +97,7 @@ app.use(
         VERCEL_PATTERN.test(incomingOrigin)       ||
         EXTRA_ORIGINS.includes(incomingOrigin)    ||
         incomingOrigin === "http://localhost:5173" ||
+        incomingOrigin === "http://localhost:8080" ||
         incomingOrigin === "http://localhost:3000";
 
       if (allowed) {
@@ -163,8 +165,9 @@ app.get("/api/health", (_req, res) =>
 // NOTE: express.json() / urlencoded() are NOT repeated here —
 // they are already registered at step 3 above.
 app.use("/api/auth",         authRoutes);
-app.use("/api/user",         meRoutes);         // GET /api/user/me ← fixes 404
-app.use("/api/auth",         meRoutes);         // GET /api/auth/me ← AuthContext.tsx and src/lib/api.ts both call this path; same router, same behaviour, just also reachable here.
+app.use("/api/auth",         meRoutes);         // GET /api/auth/me, PATCH /api/auth/me, DELETE /api/auth/me, candidate-profile
+app.use("/api",              meRoutes);         // GET /api/me, PATCH /api/me, DELETE /api/me
+app.use("/api/user",         userRoutes);       // GET /api/user/me, GET /api/user/stats, /api/user/saved-careers, /api/user/avatar, etc.
 app.use("/api/auth",         oauthRoutes);
 app.use("/api/auth",         passwordRoutes);
 app.use("/api/jobs",         jobsRoutes);
