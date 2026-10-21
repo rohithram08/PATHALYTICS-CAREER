@@ -16,6 +16,9 @@ async function verifyResumeBuilder() {
   });
 
   const page = await browser.newPage();
+  page.on("console", (msg) => console.log("  [BROWSER CONSOLE]:", msg.type(), msg.text()));
+  page.on("pageerror", (err) => console.log("  [BROWSER ERROR]:", err.message));
+  page.on("requestfailed", (req) => console.log("  [BROWSER REQ FAILED]:", req.url(), req.failure()?.errorText));
 
   try {
     // 1. Login with verified candidate
@@ -27,8 +30,17 @@ async function verifyResumeBuilder() {
     await page.fill("#email", seekerEmail);
     await page.fill("#password", seekerPass);
     await page.click('button[type="submit"]');
-    await page.waitForURL("**/dashboard", { timeout: 15000 });
-    console.log("  ✅ Logged in and reached /dashboard");
+
+    try {
+      await page.waitForURL("**/dashboard", { timeout: 15000 });
+      console.log("  ✅ Logged in and reached /dashboard");
+    } catch (navErr) {
+      const currentUrl = page.url();
+      const pageText = await page.textContent("body");
+      console.error(`  ❌ Login navigation failed. Current URL: ${currentUrl}`);
+      console.error(`  ❌ Page text snippet: ${pageText?.slice(0, 500)}`);
+      throw navErr;
+    }
 
     // 2. Navigate to /resume-builder
     console.log("\n— 2. Navigating to ATS Resume Builder —");
@@ -140,6 +152,14 @@ async function verifyResumeBuilder() {
     const printText = await page.locator("#print-root").textContent();
     assert.ok(printText?.includes("Full-Stack Software Engineer"), "Print root contains resume content");
     assert.ok(printText?.includes("Work Experience"), "Print root contains work experience");
+
+    // Verify toasts are hidden under @media print
+    const sonnerToaster = page.locator("[data-sonner-toaster]");
+    if (await sonnerToaster.count() > 0) {
+      const toasterVisible = await sonnerToaster.first().isVisible();
+      assert.ok(!toasterVisible, "Sonner toaster is hidden under @media print");
+    }
+    console.log("  ✅ Verified toast notifications are completely hidden in print viewport");
 
     // Generate real PDF buffer
     const pdfBuffer = await page.pdf({

@@ -180,12 +180,7 @@ export const ResumeBuilder: React.FC = () => {
   };
 
   const handlePrint = () => {
-    toast.info("Opening print dialog — select 'Save as PDF' to download your resume file.", {
-      duration: 3500,
-    });
-    setTimeout(() => {
-      window.print();
-    }, 200);
+    window.print();
   };
 
   const handleCopyPlainText = () => {
@@ -328,15 +323,21 @@ export const ResumeBuilder: React.FC = () => {
             height: auto !important;
             overflow: visible !important;
           }
-          /* Hide all screen application chrome */
+          /* Hide all screen application chrome, toasts, dialogs */
           .print\\:hidden,
           #screen-app-shell,
           header.fixed,
           footer,
           nav,
           aside,
-          #sonner-toaster {
+          .toaster,
+          [data-sonner-toaster],
+          [data-sonner-toaster] *,
+          [data-sonner-toast],
+          [data-sonner-toast] *,
+          [role="status"] {
             display: none !important;
+            visibility: hidden !important;
           }
           /* Dedicated print root */
           #print-root {
