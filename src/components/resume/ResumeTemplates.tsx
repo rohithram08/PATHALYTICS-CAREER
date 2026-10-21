@@ -19,26 +19,27 @@ import {
 interface TemplateProps {
   data: ResumeData;
   settings: ResumeSettings;
+  isPrint?: boolean;
 }
 
-export const ResumeTemplateRenderer: React.FC<TemplateProps> = ({ data, settings }) => {
+export const ResumeTemplateRenderer: React.FC<TemplateProps> = ({ data, settings, isPrint = false }) => {
   switch (settings.template) {
     case "harvard":
-      return <HarvardTemplate data={data} settings={settings} />;
+      return <HarvardTemplate data={data} settings={settings} isPrint={isPrint} />;
     case "executive":
-      return <ExecutiveTemplate data={data} settings={settings} />;
+      return <ExecutiveTemplate data={data} settings={settings} isPrint={isPrint} />;
     case "minimalist":
-      return <MinimalistTemplate data={data} settings={settings} />;
+      return <MinimalistTemplate data={data} settings={settings} isPrint={isPrint} />;
     case "modern":
     default:
-      return <ModernTemplate data={data} settings={settings} />;
+      return <ModernTemplate data={data} settings={settings} isPrint={isPrint} />;
   }
 };
 
 // ─────────────────────────────────────────────────────────────
 // TEMPLATE 1: MODERN PROFESSIONAL (With & Without Photo)
 // ─────────────────────────────────────────────────────────────
-export const ModernTemplate: React.FC<TemplateProps> = ({ data, settings }) => {
+export const ModernTemplate: React.FC<TemplateProps> = ({ data, settings, isPrint = false }) => {
   const { personalInfo, summary, experience, education, projects, skills, certifications } = data;
   const accent = settings.accentColor || "#3b82f6";
 
@@ -49,16 +50,20 @@ export const ModernTemplate: React.FC<TemplateProps> = ({ data, settings }) => {
       ? "rounded-xl"
       : "rounded-none";
 
+  const containerClasses = isPrint
+    ? "bg-white text-slate-800 p-0 font-sans w-full max-w-full min-h-0 mx-auto text-xs leading-relaxed"
+    : "bg-white text-slate-800 p-8 shadow-md font-sans w-[210mm] min-h-[297mm] mx-auto text-xs leading-relaxed";
+
   return (
     <div
-      id="printable-resume"
-      className="bg-white text-slate-800 p-8 shadow-sm print:p-0 print:shadow-none font-sans max-w-[210mm] min-h-[297mm] mx-auto text-xs leading-relaxed"
+      id={isPrint ? undefined : "printable-resume"}
+      className={containerClasses}
       style={{
         fontSize: settings.fontSize === "sm" ? "11px" : settings.fontSize === "lg" ? "13px" : "12px",
       }}
     >
       {/* Header */}
-      <header className="border-b pb-4 mb-4 flex items-start justify-between gap-4" style={{ borderColor: "#e2e8f0" }}>
+      <header className="border-b pb-4 mb-4 flex items-start justify-between gap-4 break-inside-avoid print:break-inside-avoid" style={{ borderColor: "#e2e8f0" }}>
         <div className="flex-1">
           <h1 className="text-2xl font-bold tracking-tight text-slate-900" style={{ color: accent }}>
             {personalInfo.fullName || "Your Full Name"}
@@ -125,12 +130,12 @@ export const ModernTemplate: React.FC<TemplateProps> = ({ data, settings }) => {
 
         {/* Photo Slot (Conditional) */}
         {settings.withPhoto && personalInfo.photoUrl && (
-          <div className="shrink-0 print:block">
+          <div className="shrink-0">
             <img
               src={personalInfo.photoUrl}
               alt={personalInfo.fullName}
-              className={`w-20 h-20 object-cover border-2 shadow-sm ${photoClass}`}
-              style={{ borderColor: accent }}
+              className={`object-cover border-2 shadow-sm ${photoClass}`}
+              style={{ width: "80px", height: "80px", objectFit: "cover", borderColor: accent }}
             />
           </div>
         )}
@@ -138,7 +143,7 @@ export const ModernTemplate: React.FC<TemplateProps> = ({ data, settings }) => {
 
       {/* Summary */}
       {summary && (
-        <section className="mb-4">
+        <section className="mb-4 break-inside-avoid print:break-inside-avoid">
           <h2 className="text-[11px] font-bold uppercase tracking-wider pb-1 mb-1.5 border-b" style={{ color: accent, borderColor: "#e2e8f0" }}>
             Professional Summary
           </h2>
@@ -288,19 +293,23 @@ export const ModernTemplate: React.FC<TemplateProps> = ({ data, settings }) => {
 // ─────────────────────────────────────────────────────────────
 // TEMPLATE 2: HARVARD / IVY LEAGUE CLASSIC ATS (Strict Parsing)
 // ─────────────────────────────────────────────────────────────
-export const HarvardTemplate: React.FC<TemplateProps> = ({ data, settings }) => {
+export const HarvardTemplate: React.FC<TemplateProps> = ({ data, settings, isPrint = false }) => {
   const { personalInfo, summary, experience, education, projects, skills, certifications } = data;
+
+  const containerClasses = isPrint
+    ? "bg-white text-black p-0 font-serif w-full max-w-full min-h-0 mx-auto text-xs leading-relaxed"
+    : "bg-white text-black p-8 shadow-md font-serif w-[210mm] min-h-[297mm] mx-auto text-xs leading-relaxed";
 
   return (
     <div
-      id="printable-resume"
-      className="bg-white text-black p-8 shadow-sm print:p-0 print:shadow-none font-serif max-w-[210mm] min-h-[297mm] mx-auto text-xs leading-relaxed"
+      id={isPrint ? undefined : "printable-resume"}
+      className={containerClasses}
       style={{
         fontSize: settings.fontSize === "sm" ? "11px" : settings.fontSize === "lg" ? "13px" : "12px",
       }}
     >
       {/* Header */}
-      <div className="text-center pb-2 mb-4 border-b border-black">
+      <div className="text-center pb-2 mb-4 border-b border-black break-inside-avoid print:break-inside-avoid">
         <h1 className="text-xl font-bold uppercase tracking-widest text-black">
           {personalInfo.fullName || "Your Full Name"}
         </h1>
@@ -336,7 +345,8 @@ export const HarvardTemplate: React.FC<TemplateProps> = ({ data, settings }) => 
             <img
               src={personalInfo.photoUrl}
               alt={personalInfo.fullName}
-              className="w-16 h-16 object-cover border border-black rounded-full"
+              className="object-cover border border-black rounded-full"
+              style={{ width: "64px", height: "64px", objectFit: "cover" }}
             />
           </div>
         )}
@@ -344,7 +354,7 @@ export const HarvardTemplate: React.FC<TemplateProps> = ({ data, settings }) => 
 
       {/* Summary */}
       {summary && (
-        <div className="mb-3">
+        <div className="mb-3 break-inside-avoid print:break-inside-avoid">
           <h2 className="text-[11px] font-bold uppercase tracking-wider border-b border-black pb-0.5 mb-1">
             Professional Summary
           </h2>
@@ -481,14 +491,18 @@ export const HarvardTemplate: React.FC<TemplateProps> = ({ data, settings }) => 
 // ─────────────────────────────────────────────────────────────
 // TEMPLATE 3: EXECUTIVE SIDEBAR (With & Without Photo)
 // ─────────────────────────────────────────────────────────────
-export const ExecutiveTemplate: React.FC<TemplateProps> = ({ data, settings }) => {
+export const ExecutiveTemplate: React.FC<TemplateProps> = ({ data, settings, isPrint = false }) => {
   const { personalInfo, summary, experience, education, projects, skills, certifications } = data;
   const accent = settings.accentColor || "#1e293b";
 
+  const containerClasses = isPrint
+    ? "bg-white text-slate-800 shadow-none font-sans w-full max-w-full min-h-0 mx-auto flex text-xs leading-relaxed"
+    : "bg-white text-slate-800 shadow-md font-sans w-[210mm] min-h-[297mm] mx-auto flex text-xs leading-relaxed";
+
   return (
     <div
-      id="printable-resume"
-      className="bg-white text-slate-800 shadow-sm print:p-0 print:shadow-none font-sans max-w-[210mm] min-h-[297mm] mx-auto flex text-xs"
+      id={isPrint ? undefined : "printable-resume"}
+      className={containerClasses}
       style={{
         fontSize: settings.fontSize === "sm" ? "11px" : settings.fontSize === "lg" ? "13px" : "12px",
       }}
@@ -502,8 +516,8 @@ export const ExecutiveTemplate: React.FC<TemplateProps> = ({ data, settings }) =
               <img
                 src={personalInfo.photoUrl}
                 alt={personalInfo.fullName}
-                className="w-24 h-24 object-cover border-2 shadow-sm rounded-xl"
-                style={{ borderColor: accent }}
+                className="object-cover border-2 shadow-sm rounded-xl"
+                style={{ width: "96px", height: "96px", objectFit: "cover", borderColor: accent }}
               />
             </div>
           )}
@@ -683,19 +697,23 @@ export const ExecutiveTemplate: React.FC<TemplateProps> = ({ data, settings }) =
 // ─────────────────────────────────────────────────────────────
 // TEMPLATE 4: MINIMALIST TECH DEVELOPER (With & Without Photo)
 // ─────────────────────────────────────────────────────────────
-export const MinimalistTemplate: React.FC<TemplateProps> = ({ data, settings }) => {
+export const MinimalistTemplate: React.FC<TemplateProps> = ({ data, settings, isPrint = false }) => {
   const { personalInfo, summary, experience, education, projects, skills } = data;
   const accent = settings.accentColor || "#0f766e";
 
+  const containerClasses = isPrint
+    ? "bg-white text-neutral-800 p-0 font-sans w-full max-w-full min-h-0 mx-auto text-xs leading-normal"
+    : "bg-white text-neutral-800 p-8 shadow-md font-sans w-[210mm] min-h-[297mm] mx-auto text-xs leading-normal";
+
   return (
     <div
-      id="printable-resume"
-      className="bg-white text-neutral-800 p-8 shadow-sm print:p-0 print:shadow-none font-sans max-w-[210mm] min-h-[297mm] mx-auto text-xs leading-normal"
+      id={isPrint ? undefined : "printable-resume"}
+      className={containerClasses}
       style={{
         fontSize: settings.fontSize === "sm" ? "11px" : settings.fontSize === "lg" ? "13px" : "12px",
       }}
     >
-      <header className="flex justify-between items-start pb-3 mb-3 border-b-2" style={{ borderColor: accent }}>
+      <header className="flex justify-between items-start pb-3 mb-3 border-b-2 break-inside-avoid print:break-inside-avoid" style={{ borderColor: accent }}>
         <div>
           <h1 className="text-xl font-bold tracking-tight text-neutral-900">
             {personalInfo.fullName || "Your Full Name"}
@@ -716,7 +734,8 @@ export const MinimalistTemplate: React.FC<TemplateProps> = ({ data, settings }) 
           <img
             src={personalInfo.photoUrl}
             alt={personalInfo.fullName}
-            className="w-16 h-16 object-cover rounded-lg border border-neutral-300"
+            className="object-cover rounded-lg border border-neutral-300"
+            style={{ width: "64px", height: "64px", objectFit: "cover" }}
           />
         )}
       </header>

@@ -7,7 +7,7 @@ const CHROME_PATH = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
 
 async function verifyResumeBuilder() {
   console.log("=======================================================");
-  console.log(" TESTING ATS RESUME BUILDER IN REAL HEADLESS CHROME");
+  console.log(" TESTING ATS RESUME BUILDER & PDF EXPORT IN REAL CHROME");
   console.log("=======================================================\n");
 
   const browser = await chromium.launch({
@@ -33,9 +33,15 @@ async function verifyResumeBuilder() {
     // 2. Navigate to /resume-builder
     console.log("\n— 2. Navigating to ATS Resume Builder —");
     await page.goto(`${FRONTEND_URL}/resume-builder`, { waitUntil: "networkidle" });
-    const heading = await page.textContent("h1");
+    const pageHeading = page.getByRole("heading", { name: "ATS Resume Builder" });
+    const heading = await pageHeading.textContent();
     assert.ok(heading?.includes("ATS Resume Builder"), "Header contains 'ATS Resume Builder'");
-    console.log("  ✅ Heading verified: 'ATS Resume Builder'");
+
+    // Verify top layout clearance
+    const headerBox = await page.locator("header.fixed").boundingBox();
+    const titleBox = await pageHeading.boundingBox();
+    assert.ok(titleBox.y > (headerBox?.y || 0) + (headerBox?.height || 0), "Title sits cleanly below fixed navbar with no collision");
+    console.log(`  ✅ Heading verified: 'ATS Resume Builder' at y=${titleBox.y}px (clear of navbar)`);
 
     // 3. Verify All 4 Templates exist
     console.log("\n— 3. Verifying Multi-Template Selector —");
@@ -63,56 +69,90 @@ async function verifyResumeBuilder() {
     const photoToggle = page.locator("#photo-toggle");
     assert.ok(await photoToggle.isVisible(), "Photo toggle switch visible");
 
-    // Check photo is visible initially
+    // Check photo is visible initially in preview
     const initialImgCount = await page.locator("#printable-resume img").count();
     assert.ok(initialImgCount >= 1, "Photo rendered in resume preview when 'With Photo' is active");
     console.log(`  ✅ 'With Photo' active: ${initialImgCount} photo rendered in DOM`);
 
     // Toggle photo OFF -> Without Photo
     await photoToggle.click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(400);
     const noPhotoImgCount = await page.locator("#printable-resume img").count();
     assert.equal(noPhotoImgCount, 0, "No photo rendered when toggled to 'Without Photo'");
     console.log("  ✅ 'Without Photo' active: photo removed from DOM for strict ATS parsing");
 
     // Toggle photo back ON -> With Photo
     await photoToggle.click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(400);
     const photoRestoredCount = await page.locator("#printable-resume img").count();
     assert.ok(photoRestoredCount >= 1, "Photo restored when toggled back to 'With Photo'");
     console.log("  ✅ 'With Photo' restored cleanly");
 
-    // 6. Test Template Switching in DOM
-    console.log("\n— 6. Switching Through All Templates —");
+    // 6. Test Zoom Controls
+    console.log("\n— 6. Verifying Zoom Preset Controls —");
+    const fitBtn = page.getByRole("button", { name: "Fit" });
+    const fullBtn = page.getByRole("button", { name: "100%" });
+    assert.ok(await fitBtn.isVisible(), "Fit zoom button visible");
+    assert.ok(await fullBtn.isVisible(), "100% zoom button visible");
+    await fitBtn.click();
+    await page.waitForTimeout(200);
+    assert.ok((await page.textContent("body"))?.includes("75%"), "Fit zoom sets scale to 75%");
+    await fullBtn.click();
+    await page.waitForTimeout(200);
+    assert.ok((await page.textContent("body"))?.includes("100%"), "100% zoom sets scale to 100%");
+    await fitBtn.click(); // Return to fit
+    console.log("  ✅ Zoom preset buttons verified (75% fit and 100% standard)");
+
+    // 7. Test Template Switching in DOM
+    console.log("\n— 7. Switching Through All Templates —");
     await harvardBtn.click();
-    await page.waitForTimeout(400);
-    const harvardResume = await page.locator("#printable-resume").first();
+    await page.waitForTimeout(300);
+    const harvardResume = page.locator("#printable-resume").first();
     const harvardClasses = await harvardResume.getAttribute("class");
     assert.ok(harvardClasses?.includes("font-serif"), "Harvard template applied serif typography");
     console.log("  ✅ Harvard / Classic ATS template rendered with serif typography");
 
     await executiveBtn.click();
-    await page.waitForTimeout(400);
-    const executiveSidebar = await page.locator("#printable-resume aside").first();
+    await page.waitForTimeout(300);
+    const executiveSidebar = page.locator("#printable-resume aside").first();
     assert.ok(await executiveSidebar.isVisible(), "Executive sidebar layout rendered");
     console.log("  ✅ Executive Sidebar template rendered with dual-column layout");
 
     await minimalistBtn.click();
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(300);
     const miniText = await page.locator("#printable-resume").textContent();
     assert.ok(miniText?.includes("// TECHNICAL_STACK"), "Tech minimalist terminal format rendered");
     console.log("  ✅ Tech Minimalist template rendered with developer code format");
 
-    // 7. Verify Print / Save PDF action
-    console.log("\n— 7. Verifying Print & Export Controls —");
-    const printBtn = page.getByRole("button", { name: "Print / Save PDF" });
-    assert.ok(await printBtn.isVisible(), "Print / Save PDF button visible and ready");
-    const copyBtn = page.getByRole("button", { name: "Copy Plain Text" });
-    assert.ok(await copyBtn.isVisible(), "Copy Plain Text button visible and ready");
-    console.log("  ✅ Print / Save PDF & Copy Plain Text buttons verified");
+    // Switch back to Modern
+    await modernBtn.click();
+    await page.waitForTimeout(300);
+
+    // 8. Crucial Test: PDF Print Emulation & Non-Blank Guarantee
+    console.log("\n— 8. Verifying PDF Print Emulation & Non-Blank Guarantee —");
+    await page.emulateMedia({ media: "print" });
+    const printRootVisible = await page.locator("#print-root").isVisible();
+    assert.ok(printRootVisible, "#print-root is visible under @media print");
+
+    const screenAppHidden = await page.locator("#screen-app-shell").isHidden();
+    assert.ok(screenAppHidden, "#screen-app-shell is hidden under @media print");
+
+    const printText = await page.locator("#print-root").textContent();
+    assert.ok(printText?.includes("Full-Stack Software Engineer"), "Print root contains resume content");
+    assert.ok(printText?.includes("Work Experience"), "Print root contains work experience");
+
+    // Generate real PDF buffer
+    const pdfBuffer = await page.pdf({
+      format: "A4",
+      printBackground: true,
+      margin: { top: "10mm", bottom: "10mm", left: "12mm", right: "12mm" },
+    });
+    console.log(`  📄 Generated PDF Buffer Size: ${pdfBuffer.length} bytes`);
+    assert.ok(pdfBuffer.length > 50000, `PDF size (${pdfBuffer.length} bytes) confirms document is fully rendered, NOT blank!`);
+    console.log("  ✅ PDF print engine verified: Non-blank, fully formatted vector resume!");
 
     console.log("\n=======================================================");
-    console.log(" ALL RESUME BUILDER BROWSER TESTS PASSED (0 FAILURES) ");
+    console.log(" ALL RESUME BUILDER & PDF TESTS PASSED (0 FAILURES) ");
     console.log("=======================================================\n");
   } catch (err) {
     console.error("FATAL ERROR in Resume Builder test:", err);

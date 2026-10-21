@@ -105,7 +105,7 @@ const Footer = () => {
   ];
 
   return (
-    <footer className="bg-muted/30 border-t">
+    <footer className="bg-muted/30 border-t print:hidden">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
 
         {/* ── Newsletter ── */}
